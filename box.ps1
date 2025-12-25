@@ -6,7 +6,7 @@
     Compiled from modular sources by build-box.ps1
 
 .NOTES
-    Compilation Date: 2025-12-26 00:37:10
+    Compilation Date: 2025-12-26 00:58:41
     Source Modules: 16
     Build System: Feature 001 - Compilation System
 #>
