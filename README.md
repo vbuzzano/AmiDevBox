@@ -5,42 +5,43 @@ Complete Amiga OS development kit setup for cross-compilation on Windows with VB
 ## 🚀 Quick Start
 
 ```powershell
-# Run the interactive installer
-irm https://github.com/vbuzzano/AmigaDevBox/raw/main/install.ps1 | iex
+# Install DevBox globally (one-time setup)
+irm https://github.com/vbuzzano/AmiDevBox/raw/main/devbox.ps1 | iex
 
-# Follow the wizard to create your project
-# Then install packages:
+# Create and setup your project
+devbox init MyProject
 cd MyProject
-.\box.ps1 install
+box install
 
 # Build your project
 make
 ```
 
-## 📦 What's Included
+## 📦 What Is It
 
-- **VBCC Compiler** - m68k AmigaOS C compiler
-- **NDK 3.2+** - AmigaOS development kit headers and libraries
-- **Build System** - Pre-configured Makefiles and build scripts
-- **Templates** - Ready-to-use project templates
+- **Automate Projects** - Reproducible development environment setup
+- **Easy Recreation** - Share and recreate projects effortlessly
+- **Compiler Ready** - Auto-installs VBCC (more compilers coming soon)
+- **Complete Toolchain** - Downloads NDK headers and libraries automatically
+- **Zero Config** - Pre-configured Makefiles and build system ready to use
 
 ## 🛠️ Commands
 
 ```powershell
 # Project setup
-.\box.ps1 install          # Install all packages
-.\box.ps1 uninstall        # Remove packages
+box install                # Install all packages
+box uninstall              # Remove packages
 
 # Environment
-.\box.ps1 env list         # Show environment variables
-.\box.ps1 env set KEY VAL  # Set environment variable
+box env list               # Show environment variables
+box env set KEY VAL        # Set environment variable
 
 # Package management
-.\box.ps1 pkg list         # List installed packages
-.\box.ps1 pkg info NAME    # Show package details
+box pkg list               # List installed packages
+box pkg info NAME          # Show package details
 
 # Help
-.\box.ps1 help             # Show all available commands
+box help                   # Show all available commands
 ```
 
 ## 📚 Documentation
