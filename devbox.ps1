@@ -1,17 +1,30 @@
 <#
 .SYNOPSIS
-    DevBox Bootstrap Installer
+    DevBox Bootstrap Installer & Global Setup
 
 .DESCRIPTION
     Creates or initializes a DevBox project structure for cross-platform development.
-    Supports two modes: init (new project) and add (existing project).
+    Supports three modes:
+    - Global installation (no arguments): Install DevBox globally to PowerShell profile
+    - Init mode: Create new DevBox project
+    - Add mode: Add DevBox to existing project
 
-    Usage:
+    Global Installation:
+      When run without arguments via 'irm | iex', DevBox installs itself globally:
+      - Copies devbox.ps1 to PowerShell Scripts directory
+      - Injects 'devbox' and 'box' functions into PowerShell profile
+      - Uses #region markers for clean separation (future uninstall support)
+
+    After global installation, 'devbox' and 'box' commands are available anywhere:
+      - devbox: Project creation and management
+      - box: Smart command that finds parent .box/ directory automatically
+
+    Project Operations:
       devbox init MyProject [Description]
       devbox add [in existing directory]
 
     Remote installation:
-      irm https://github.com/vbuzzano/DevBoxFoundry/raw/main/devbox.ps1 | iex -ArgumentList 'init', 'MyProject'
+      irm https://github.com/vbuzzano/DevBoxFoundry/raw/main/devbox.ps1 | iex
 
 .PARAMETER Mode
     Operation mode: 'init' or 'add'. Auto-detected if not specified.
@@ -26,14 +39,28 @@
     Auto-answer for VS Code integration (for scripting). Prompts if not specified.
 
 .EXAMPLE
+    # Global installation (first time)
+    irm https://github.com/vbuzzano/DevBoxFoundry/raw/main/devbox.ps1 | iex
+
+.EXAMPLE
+    # After installation: Create new project
     devbox init MyProject "My awesome project"
+
+.EXAMPLE
+    # After installation: Add to existing directory
     devbox add
-    irm https://.../devbox.ps1 | iex
+
+.EXAMPLE
+    # Use box command from any subdirectory
+    cd MyProject/src/components
+    box install  # Automatically finds parent .box/
 
 .NOTES
     Author: ReddoC
     Version: 0.1.0
     Requires: PowerShell 7+, Git
+    Installation: Single command via irm | iex
+    Profile Integration: Uses #region devbox initialize markers
 #>
 
 param(
@@ -56,6 +83,21 @@ if ($Arguments.Count -gt 0) {
 
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
+
+# ============================================================================
+# INSTALLATION DETECTION
+# ============================================================================
+
+# Check if DevBox is installed globally
+$Script:IsInstalledGlobally = Test-Path "$env:USERPROFILE\Documents\PowerShell\Scripts\devbox.ps1"
+$Script:HasProfileIntegration = $false
+
+if (Test-Path $PROFILE.CurrentUserAllHosts -ErrorAction SilentlyContinue) {
+    $profileContent = Get-Content $PROFILE.CurrentUserAllHosts -Raw -ErrorAction SilentlyContinue
+    if ($profileContent) {
+        $Script:HasProfileIntegration = $profileContent -match '#region devbox initialize'
+    }
+}
 
 # ============================================================================
 # CONFIGURATION
@@ -137,6 +179,25 @@ function Sanitize-ProjectName {
     # Remove leading/trailing dashes
     $sanitized = $sanitized -replace '^-+|-+$', ''
     return $sanitized
+}
+
+function Test-ProfileHasDevBox {
+    <#
+    .SYNOPSIS
+        Checks if PowerShell profile has DevBox integration
+    .OUTPUTS
+        Boolean - $true if #region devbox initialize exists in profile
+    #>
+    if (-not (Test-Path $PROFILE.CurrentUserAllHosts -ErrorAction SilentlyContinue)) {
+        return $false
+    }
+
+    $profileContent = Get-Content $PROFILE.CurrentUserAllHosts -Raw -ErrorAction SilentlyContinue
+    if (-not $profileContent) {
+        return $false
+    }
+
+    return $profileContent -match '#region devbox initialize'
 }
 
 # Rollback tracking for error recovery
@@ -556,10 +617,166 @@ DefaultFPU=
 }
 
 # ============================================================================
+# GLOBAL INSTALLATION
+# ============================================================================
+
+function Install-DevBoxGlobal {
+    <#
+    .SYNOPSIS
+        Installs DevBox globally into PowerShell profile
+    .DESCRIPTION
+        Copies devbox.ps1 to Scripts directory and injects
+        devbox/box functions into user profile.ps1 using #region markers.
+        This enables 'devbox' and 'box' commands from any location.
+    .NOTES
+        Uses #region markers for clean separation and future uninstallation.
+        Safe to run multiple times (idempotent).
+    #>
+
+    Write-Title '🧙 DevBox Global Installation'
+    Write-Host ''
+
+    try {
+        # Step 1: Ensure Scripts directory exists
+        # PowerShell Scripts directory is: $env:USERPROFILE\Documents\PowerShell\Scripts
+        # This is a standard location that PowerShell searches for scripts
+        $scriptsDir = "$env:USERPROFILE\Documents\PowerShell\Scripts"
+        if (-not (Test-Path $scriptsDir)) {
+            New-Item -ItemType Directory -Path $scriptsDir -Force | Out-Null
+            Write-Success 'Created Scripts directory'
+        }
+
+        # Step 2: Copy devbox.ps1 to global location
+        # $PSCommandPath contains the full path of the currently executing script
+        # This ensures we copy the correct file even when run via irm | iex
+        $targetPath = Join-Path $scriptsDir 'devbox.ps1'
+        Copy-Item $PSCommandPath $targetPath -Force
+        Write-Success "Installed devbox.ps1 to Scripts"
+
+        # Step 3: Create PowerShell profile if it doesn't exist
+        # $PROFILE.CurrentUserAllHosts is the profile that loads for all hosts
+        # This ensures devbox works in PowerShell console, ISE, VS Code, etc.
+        $profilePath = $PROFILE.CurrentUserAllHosts
+        if (-not (Test-Path $profilePath)) {
+            $profileDir = Split-Path $profilePath -Parent
+            if (-not (Test-Path $profileDir)) {
+                New-Item -ItemType Directory -Path $profileDir -Force | Out-Null
+            }
+            New-Item -ItemType File -Path $profilePath -Force | Out-Null
+            Write-Success 'Created PowerShell profile'
+        }
+
+        # Step 4: Check for existing installation (idempotency)
+        # #region markers allow clean detection and future uninstallation
+        # Similar to conda, pyenv, and other environment managers
+        $profileContent = Get-Content $profilePath -Raw -ErrorAction SilentlyContinue
+        if ($profileContent -match '#region devbox initialize') {
+            Write-Host "  ℹ️  DevBox already configured in profile" -ForegroundColor Cyan
+        }
+        else {
+            # Step 5: Inject function wrappers into profile
+            # The devbox function calls the global script with all arguments
+            # The box function searches parent directories for .box/ projects
+            # Both use @args to forward all parameters transparently
+            $injection = @'
+
+#region devbox initialize
+# Managed by DevBox installer - do not edit manually
+# To uninstall: run 'devbox uninstall' (Feature 007)
+
+function devbox {
+    & "$env:USERPROFILE\Documents\PowerShell\Scripts\devbox.ps1" @args
+}
+
+function box {
+    $boxScript = $null
+    $current = Get-Location
+
+    while ($current.Path -ne [System.IO.Path]::GetPathRoot($current.Path)) {
+        $testPath = Join-Path $current.Path ".box\box.ps1"
+        if (Test-Path $testPath) {
+            $boxScript = $testPath
+            break
+        }
+        $parent = Split-Path $current.Path -Parent
+        if (-not $parent) { break }
+        $current = Get-Item $parent
+    }
+
+    if (-not $boxScript) {
+        Write-Host "❌ No DevBox project found" -ForegroundColor Red
+        Write-Host ""
+        Write-Host "Create a new project:" -ForegroundColor Cyan
+        Write-Host "  devbox init MyProject" -ForegroundColor White
+        return
+    }
+
+    & $boxScript @args
+}
+#endregion
+'@
+
+            Add-Content -Path $profilePath -Value $injection -Encoding UTF8
+            Write-Success 'Added devbox functions to profile'
+        }
+
+        # Step 6: Display success message with next steps
+        # Clear instructions help users understand what just happened
+        # and what they need to do next
+        Write-Host ''
+        Write-Success 'DevBox installed globally'
+        Write-Host ''
+        Write-Host "  📍 Location: $scriptsDir\devbox.ps1" -ForegroundColor Cyan
+        Write-Host ''
+        Write-Host '  Next steps:' -ForegroundColor Yellow
+        Write-Host '    1. Restart PowerShell or run: . $PROFILE' -ForegroundColor White
+        Write-Host '    2. Create a project: devbox init MyProject' -ForegroundColor White
+        Write-Host ''
+
+        # Early return prevents the wizard from running after installation
+        # This is critical - we don't want to enter interactive mode
+        # after a successful global installation
+        return
+    }
+    catch {
+        Write-Host ''
+        Write-Error-Custom "Installation failed: $_"
+        exit 1
+    }
+}
+
+# ============================================================================
 # MAIN
 # ============================================================================
 
 function Main {
+    # Check if executed without arguments and not installed - trigger installation mode
+    if ($Arguments.Count -eq 0 -and -not $Script:HasProfileIntegration) {
+        Install-DevBoxGlobal
+        return
+    }
+
+    # T031: Display help when devbox called with no arguments (after installation)
+    if ($Arguments.Count -eq 0 -and $Script:HasProfileIntegration) {
+        Write-Host ''
+        Write-Host "🧙 DevBox v$($Script:Config.Version)" -ForegroundColor Magenta
+        Write-Host ''
+        Write-Host 'Usage:' -ForegroundColor Cyan
+        Write-Host '  devbox init [ProjectName] [Description]    Create new DevBox project' -ForegroundColor White
+        Write-Host '  devbox add                                  Add DevBox to existing project' -ForegroundColor White
+        Write-Host ''
+        Write-Host 'Examples:' -ForegroundColor Cyan
+        Write-Host "  devbox init MyProject                       Create project in .\MyProject\" -ForegroundColor Gray
+        Write-Host "  devbox init 'My Cool App' 'Description'     Handles spaces in names" -ForegroundColor Gray
+        Write-Host '  devbox add                                  Add to current directory' -ForegroundColor Gray
+        Write-Host ''
+        Write-Host 'Box Commands (inside a project):' -ForegroundColor Cyan
+        Write-Host '  box help                                    Show box command help' -ForegroundColor Gray
+        Write-Host '  box install                                 Install project packages' -ForegroundColor Gray
+        Write-Host ''
+        return
+    }
+
     Write-Host ''
     Write-Host '🧙 DevBox Bootstrap v0.1.0' -ForegroundColor Cyan
     Write-Host ''
