@@ -732,17 +732,17 @@ function devbox {
 
 function box {
     $boxScript = $null
-    $current = Get-Location
+    $current = (Get-Location).Path
 
-    while ($current.Path -ne [System.IO.Path]::GetPathRoot($current.Path)) {
-        $testPath = Join-Path $current.Path ".box\box.ps1"
+    while ($current -ne [System.IO.Path]::GetPathRoot($current)) {
+        $testPath = Join-Path $current ".box\box.ps1"
         if (Test-Path $testPath) {
             $boxScript = $testPath
             break
         }
-        $parent = Split-Path $current.Path -Parent
+        $parent = Split-Path $current -Parent
         if (-not $parent) { break }
-        $current = Get-Item $parent
+        $current = $parent
     }
 
     if (-not $boxScript) {
