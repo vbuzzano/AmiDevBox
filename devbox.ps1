@@ -289,8 +289,14 @@ function Initialize-NewProject {
             else {
                 # Remote download (also used when run via irm | iex)
                 $ProgressPreference = 'SilentlyContinue'
-                Invoke-RestMethod -Uri $BoxUrl -OutFile $BoxDest -ErrorAction Stop
-                Write-Success 'Downloaded: box.ps1 to .box/'
+                $response = Invoke-WebRequest -Uri $BoxUrl -ErrorAction Stop
+                if ($response.StatusCode -eq 200) {
+                    Set-Content -Path $BoxDest -Value $response.Content -Encoding UTF8
+                    Write-Success 'Downloaded: box.ps1 to .box/'
+                }
+                else {
+                    throw "HTTP $($response.StatusCode)"
+                }
             }
 
             if (-not (Test-Path $BoxDest)) {
@@ -318,8 +324,14 @@ function Initialize-NewProject {
             else {
                 # Remote download (also used when run via irm | iex)
                 $ProgressPreference = 'SilentlyContinue'
-                Invoke-RestMethod -Uri $ConfigUrl -OutFile $ConfigDest -ErrorAction Stop
-                Write-Success 'Downloaded: config.psd1 to .box/'
+                $response = Invoke-WebRequest -Uri $ConfigUrl -ErrorAction Stop
+                if ($response.StatusCode -eq 200) {
+                    Set-Content -Path $ConfigDest -Value $response.Content -Encoding UTF8
+                    Write-Success 'Downloaded: config.psd1 to .box/'
+                }
+                else {
+                    throw "HTTP $($response.StatusCode)"
+                }
             }
 
             if (-not (Test-Path $ConfigDest)) {
@@ -351,8 +363,14 @@ function Initialize-NewProject {
             else {
                 # Remote download (also used when run via irm | iex)
                 $ProgressPreference = 'SilentlyContinue'
-                Invoke-RestMethod -Uri $EnvPsUrl -OutFile $EnvPsDest -ErrorAction Stop
-                Write-Success 'Downloaded: tpl/.env.ps1 to .box/'
+                $response = Invoke-WebRequest -Uri $EnvPsUrl -ErrorAction Stop
+                if ($response.StatusCode -eq 200) {
+                    Set-Content -Path $EnvPsDest -Value $response.Content -Encoding UTF8
+                    Write-Success 'Downloaded: tpl/.env.ps1 to .box/'
+                }
+                else {
+                    throw "HTTP $($response.StatusCode)"
+                }
             }
         }
         catch {
