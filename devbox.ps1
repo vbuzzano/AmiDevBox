@@ -150,11 +150,11 @@ function Test-Prerequisites {
 }
 
 function Get-RemoteDownloadUrl {
-    # Returns URL to download devbox.ps1 from GitHub
+    # Returns URL to download devbox.ps1 from GitHub (release repository)
     $org = 'vbuzzano'
-    $repo = 'DevBoxFoundry'
+    $repo = 'AmiDevBox'
     $branch = 'main'
-    return "https://github.com/$org/$repo/raw/$branch/dist/devbox.ps1"
+    return "https://github.com/$org/$repo/raw/$branch/devbox.ps1"
 }
 
 function Show-RemoteInstallationError {
