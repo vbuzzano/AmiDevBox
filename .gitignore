@@ -1,5 +1,5 @@
 # Compiled outputs
-/dist/release/
+/dist/
 
 # PowerShell
 *.log

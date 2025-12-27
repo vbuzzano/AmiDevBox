@@ -276,21 +276,18 @@ function Initialize-NewProject {
         # Download/copy box.ps1 from release
         Write-Step 'Downloading box.ps1'
         try {
-            $BoxUrl = 'https://github.com/vbuzzano/DevBoxFoundry/raw/main/dist/box.ps1'
+            $BoxUrl = 'https://github.com/vbuzzano/AmiDevBox/raw/main/box.ps1'
             $BoxDest = Join-Path $BoxPath 'box.ps1'
 
             # Try local copy first (for development), then remote download
-            $LocalBoxPath = Join-Path (Split-Path $Script:MyInvocation.MyCommand.Path) 'box.ps1'
-            if (-not (Test-Path $LocalBoxPath)) {
-                $LocalBoxPath = 'box.ps1'
-            }
+            $LocalBoxPath = Join-Path (Split-Path -Parent $PSCommandPath) 'box.ps1'
 
-            if (Test-Path $LocalBoxPath) {
+            if ($PSCommandPath -and (Test-Path $LocalBoxPath)) {
                 Copy-Item $LocalBoxPath $BoxDest -Force
                 Write-Success 'Copied: box.ps1 to .box/'
             }
             else {
-                # Fallback to remote download
+                # Remote download (also used when run via irm | iex)
                 $ProgressPreference = 'SilentlyContinue'
                 Invoke-RestMethod -Uri $BoxUrl -OutFile $BoxDest -ErrorAction Stop
                 Write-Success 'Downloaded: box.ps1 to .box/'
