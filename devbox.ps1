@@ -745,7 +745,7 @@ function box {
         Write-Host "  📍 Location: $scriptsDir\devbox.ps1" -ForegroundColor Cyan
         Write-Host ''
         Write-Host '  Next steps:' -ForegroundColor Yellow
-        Write-Host '    1. Restart PowerShell or run: . $PROFILE' -ForegroundColor White
+        Write-Host '    1. Open a new PowerShell window' -ForegroundColor White
         Write-Host '    2. Create a project: devbox init MyProject' -ForegroundColor White
         Write-Host ''
 
