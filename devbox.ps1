@@ -302,6 +302,35 @@ function Initialize-NewProject {
             throw
         }
 
+        # Download/copy config.psd1 from release
+        Write-Step 'Downloading config.psd1'
+        try {
+            $ConfigUrl = 'https://github.com/vbuzzano/AmiDevBox/raw/main/config.psd1'
+            $ConfigDest = Join-Path $BoxPath 'config.psd1'
+
+            # Try local copy first (for development), then remote download
+            $LocalConfigPath = Join-Path (Split-Path -Parent $PSCommandPath) 'config.psd1'
+
+            if ($PSCommandPath -and (Test-Path $LocalConfigPath)) {
+                Copy-Item $LocalConfigPath $ConfigDest -Force
+                Write-Success 'Copied: config.psd1 to .box/'
+            }
+            else {
+                # Remote download (also used when run via irm | iex)
+                $ProgressPreference = 'SilentlyContinue'
+                Invoke-RestMethod -Uri $ConfigUrl -OutFile $ConfigDest -ErrorAction Stop
+                Write-Success 'Downloaded: config.psd1 to .box/'
+            }
+
+            if (-not (Test-Path $ConfigDest)) {
+                throw 'config.psd1 not found'
+            }
+        }
+        catch {
+            Write-Error-Custom "Setup failed: $_"
+            throw
+        }
+
         # Generate box.config.psd1
         Write-Step 'Generating configuration file'
         $ConfigPath = Join-Path $TargetDir $Script:Config.ConfigFile

@@ -6,7 +6,7 @@
     Compiled from modular sources by build-box.ps1
 
 .NOTES
-    Compilation Date: 2025-12-27 03:40:28
+    Compilation Date: 2025-12-27 06:53:08
     Source Modules: 16
     Build System: Feature 001 - Compilation System
 #>
@@ -106,8 +106,8 @@ if ((Split-Path $_scriptDir -Leaf) -eq 'scripts') {
 } else {
     $script:BaseDir = $_scriptDir
 }
-$script:SetupDir = Join-Path $BaseDir ".setup"
-$script:SetupCommand = $Command
+$script:BoxDir = Join-Path $BaseDir ".box"
+$script:BoxCommand = $Command
 
 # ============================================================================
 # Initialize (loads configs, functions, and derived paths)
@@ -141,7 +141,7 @@ function Invoke-Install {
     Write-Host "========================================" -ForegroundColor Magenta
 
     # Run install script if exists
-    $installScript = Join-Path $SetupDir "install.ps1"
+    $installScript = Join-Path $BoxDir "install.ps1"
     if (Test-Path $installScript) {
         & $installScript
     } else {
@@ -173,7 +173,7 @@ function Invoke-Uninstall {
     Write-Host "  Uninstall Environment" -ForegroundColor Yellow
     Write-Host "========================================" -ForegroundColor Yellow
 
-    $uninstallScript = Join-Path $SetupDir "uninstall.ps1"
+    $uninstallScript = Join-Path $BoxDir "uninstall.ps1"
     if (Test-Path $uninstallScript) {
         & $uninstallScript
     } else {
@@ -799,8 +799,8 @@ function Ask-Path {
 
 # Common filenames (can be referenced by other scripts)
 $script:ConfigFileName = 'config.psd1'
-$script:UserConfigFileName = 'setup.config.psd1'
-$script:MakefileTemplateName = '.setup/template/Makefile.template'
+$script:UserConfigFileName = 'box.config.psd1'
+$script:MakefileTemplateName = '.box/template/Makefile.template'
 
 function Get-IncPath {
     param([string]$Name)
@@ -839,7 +839,7 @@ function Source-Rel {
 
 function Create-Directories {
     Write-Step "Creating project directories"
-    
+
     foreach ($dir in $Config.Directories) {
         $fullPath = Join-Path $BaseDir $dir
         if (-not (Test-Path $fullPath)) {
@@ -847,7 +847,7 @@ function Create-Directories {
             Write-Info "Created: $dir/"
         }
     }
-    
+
     Write-Success "Directories ready"
 }
 
@@ -860,16 +860,16 @@ function Cleanup-Temp {
 
 function Do-Uninstall {
     Write-Step "Removing installed packages and generated files"
-    
+
     $state = Load-State
     $removedCount = 0
-    
+
     # Remove installed packages (files and dirs tracked in state)
     foreach ($pkgName in @($state.packages.Keys)) {
         $pkgState = $state.packages[$pkgName]
         if ($pkgState.installed) {
             Write-Info "Removing $pkgName..."
-            
+
             # First remove files
             if ($pkgState.files) {
                 foreach ($file in $pkgState.files) {
@@ -879,14 +879,14 @@ function Do-Uninstall {
                     }
                 }
             }
-            
+
             # Then remove created directories (if empty)
             if ($pkgState.dirs) {
                 foreach ($dir in $pkgState.dirs) {
                     Remove-DirectoryIfEmpty -Path $dir
                 }
             }
-            
+
             # Clean empty parent directories (bottom-up from files)
             if ($pkgState.files) {
                 foreach ($file in $pkgState.files) {
@@ -897,7 +897,7 @@ function Do-Uninstall {
         }
         Remove-PackageState $pkgName
     }
-    
+
     # Remove generated env files
     @(".env", ".env.custom") | ForEach-Object {
         $path = Join-Path $BaseDir $_
@@ -907,9 +907,9 @@ function Do-Uninstall {
             $removedCount++
         }
     }
-    
-    # Remove .setup internal directories (cache, tools)
-    @(".setup/cache", ".setup/tools") | ForEach-Object {
+
+    # Remove .box internal directories (cache, tools)
+    @(".box/cache", ".box/tools") | ForEach-Object {
         $path = Join-Path $BaseDir $_
         if (Test-Path $path) {
             Remove-Item $path -Recurse -Force
@@ -917,7 +917,7 @@ function Do-Uninstall {
             $removedCount++
         }
     }
-    
+
     # Always remove build and dist directories
     @("build", "dist") | ForEach-Object {
         $path = Join-Path $BaseDir $_
@@ -927,18 +927,18 @@ function Do-Uninstall {
             $removedCount++
         }
     }
-    
+
     # Remove state file last
-    $statePath = Join-Path $BaseDir ".setup/state.json"
+    $statePath = Join-Path $BaseDir ".box/state.json"
     if (Test-Path $statePath) {
         Remove-Item $statePath -Force
-        Write-Info "Removed .setup/state.json"
+        Write-Info "Removed .box/state.json"
     }
-    
+
     if ($removedCount -eq 0) {
         Write-Info "Nothing to remove"
     }
-    
+
     Write-Success "Uninstall complete"
     Write-Host ""
 }
@@ -946,7 +946,7 @@ function Do-Uninstall {
 # Remove a directory only if it's empty
 function Remove-DirectoryIfEmpty {
     param([string]$Path)
-    
+
     if (Test-Path $Path) {
         $items = Get-ChildItem $Path -Force -ErrorAction SilentlyContinue
         if ($items.Count -eq 0) {
@@ -958,7 +958,7 @@ function Remove-DirectoryIfEmpty {
 # Remove empty parent directories up to BaseDir
 function Remove-EmptyParents {
     param([string]$Path)
-    
+
     while ($Path -and $Path -ne $BaseDir -and (Test-Path $Path)) {
         $items = Get-ChildItem $Path -Force -ErrorAction SilentlyContinue
         if ($items.Count -eq 0) {
@@ -1221,15 +1221,15 @@ function Download-File {
 function Generate-DotEnvFile {
     $envPath = Join-Path $BaseDir ".env"
     $state = Load-State
-    
+
     $lines = @(
-        "# Generated by setup.ps1 - DO NOT EDIT"
-        "# Re-run 'setup.ps1 env update' to regenerate"
+        "# Generated by box - DO NOT EDIT"
+        "# Re-run 'box env update' to regenerate"
         "# $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
         ""
         "# Project Settings"
     )
-    
+
     # Project settings from merged config
     if ($Config.Project) {
         if ($Config.Project.Name) {
@@ -1245,10 +1245,10 @@ function Generate-DotEnvFile {
             $lines += "VERSION=$($Config.Project.Version)"
         }
     }
-    
+
     $lines += ""
     $lines += "# Project Paths"
-    
+
     # Paths from merged config
     if ($Config.Paths) {
         foreach ($key in $Config.Paths.Keys) {
@@ -1257,10 +1257,10 @@ function Generate-DotEnvFile {
             $lines += "$envKey=$value"
         }
     }
-    
+
     $lines += ""
     $lines += "# Package Paths"
-    
+
     foreach ($pkgName in $state.packages.Keys) {
         $pkg = $state.packages[$pkgName]
         if ($pkg.envs) {
@@ -1270,7 +1270,7 @@ function Generate-DotEnvFile {
             }
         }
     }
-    
+
     # Custom envs from config (Envs section)
     if ($Config.Envs -and $Config.Envs.Count -gt 0) {
         $lines += ""
@@ -1280,7 +1280,7 @@ function Generate-DotEnvFile {
             $lines += "$key=$value"
         }
     }
-    
+
     $lines -join "`n" | Out-File $envPath -Encoding UTF8 -NoNewline
     Write-Success "Generated .env"
 }
@@ -1297,9 +1297,9 @@ function Show-EnvList {
     Write-Host ""
     Write-Host "Environment Variables:" -ForegroundColor Cyan
     Write-Host ""
-    
+
     $state = Load-State
-    
+
     # Project settings
     Write-Host "  [Project Settings]" -ForegroundColor Yellow
     if ($Config.Project) {
@@ -1316,7 +1316,7 @@ function Show-EnvList {
             Write-Host "    VERSION = $($Config.Project.Version)" -ForegroundColor White
         }
     }
-    
+
     # Paths
     Write-Host ""
     Write-Host "  [Project Paths]" -ForegroundColor Yellow
@@ -1327,7 +1327,7 @@ function Show-EnvList {
             Write-Host "    $envKey = $value" -ForegroundColor White
         }
     }
-    
+
     # Package envs
     Write-Host ""
     Write-Host "  [Package Paths]" -ForegroundColor Yellow
@@ -1341,7 +1341,7 @@ function Show-EnvList {
             }
         }
     }
-    
+
     # Custom envs from config
     if ($Config.Envs -and $Config.Envs.Count -gt 0) {
         Write-Host ""
@@ -1351,7 +1351,7 @@ function Show-EnvList {
             Write-Host "    $key = $value" -ForegroundColor White
         }
     }
-    
+
     Write-Host ""
 }
 
@@ -1688,16 +1688,16 @@ function Ask-ManualEnvs {
 # Source: inc/functions.ps1
 # ──────────────────────────────────────────────────────────────────────────────
 # ============================================================================
-# AmigaDevBox - Setup Functions Loader
+# AmigaDevBox - Box Functions Loader
 # ============================================================================
 # This file loads all modular function files
 # DO NOT MODIFY - changes will be overwritten on updates
 # ============================================================================
 
-# Determine inc directory. Prefer $SetupDir if provided by the caller,
+# Determine inc directory. Prefer $BoxDir if provided by the caller,
 # otherwise fall back to script location.
-if ($SetupDir) {
-    $script:IncDir = Join-Path $SetupDir "inc"
+if ($BoxDir) {
+    $script:IncDir = Join-Path $BoxDir "inc"
 } else {
     $script:IncDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 }
@@ -1728,7 +1728,7 @@ if ($SetupDir) {
 
 function Show-Help {
     Write-Host ""
-    Write-Host "Usage: setup.ps1 [command] [subcommand]" -ForegroundColor Cyan
+    Write-Host "Usage: box [command] [subcommand]" -ForegroundColor Cyan
     Write-Host ""
     Write-Host "Commands:" -ForegroundColor Yellow
     Write-Host "  install          Install all dependencies (default)" -ForegroundColor White
@@ -1755,8 +1755,8 @@ function Show-Help {
 # ============================================================================
 # AmigaDevBox - Initialization Module
 # ============================================================================
-# This file handles all setup initialization: paths, configs, and functions.
-# Dot-source this from setup.ps1 to keep the main script clean.
+# This file handles all box initialization: paths, configs, and functions.
+# Dot-source this from box.ps1 to keep the main script clean.
 # ============================================================================
 
 # ============================================================================
@@ -1764,12 +1764,12 @@ function Show-Help {
 # ============================================================================
 
 $CONFIG_FILENAME = 'config.psd1'
-$USER_CONFIG_FILENAME = 'setup.config.psd1'
-$STATE_FILENAME = '.setup/state.json'
+$USER_CONFIG_FILENAME = 'box.config.psd1'
+$STATE_FILENAME = '.box/state.json'
 $FUNCTIONS_LOADER = 'inc\functions.ps1'
 
 # ============================================================================
-# Derived Paths (BaseDir and SetupDir are set by caller)
+# Derived Paths (BaseDir and BoxDir are set by caller)
 # ============================================================================
 
 $script:StateFile = Join-Path $BaseDir $STATE_FILENAME
@@ -1779,21 +1779,15 @@ $script:EnvFile = Join-Path $BaseDir ".env"
 # Load Functions (before config loading - needed for Merge-Config)
 # ============================================================================
 
-$script:FunctionsLoader = Join-Path $SetupDir $FUNCTIONS_LOADER
-if (-not (Test-Path $FunctionsLoader)) {
-    Write-Host "Functions loader not found: $FunctionsLoader" -ForegroundColor Red
-    exit 1
-}
-. $FunctionsLoader
 
 # ============================================================================
 # Configuration Loading
 # ============================================================================
 
 # Load system config
-$script:SysConfigFile = Join-Path $SetupDir $CONFIG_FILENAME
+$script:SysConfigFile = Join-Path $BoxDir $CONFIG_FILENAME
 if (-not (Test-Path $SysConfigFile)) {
-    Write-Host "$CONFIG_FILENAME not found in .setup/" -ForegroundColor Red
+    Write-Host "$CONFIG_FILENAME not found in .box/" -ForegroundColor Red
     exit 1
 }
 $script:SysConfig = Import-PowerShellDataFile $SysConfigFile
@@ -1807,11 +1801,11 @@ $script:SkipExecution = $false
 $script:StateExists = Test-Path (Join-Path $BaseDir $STATE_FILENAME)
 
 # Commands that require state (not install, not help)
-if ($SetupCommand -in @("uninstall", "env", "pkg")) {
+if ($BoxCommand -in @("uninstall", "env", "pkg")) {
     if (-not $StateExists) {
         Write-Host ""
         Write-Host "No configuration found." -ForegroundColor Red
-        Write-Host "Run 'setup' or 'setup install' first." -ForegroundColor Gray
+        Write-Host "Run 'box' or 'box install' first." -ForegroundColor Gray
         Write-Host ""
         $script:SkipExecution = $true
     }
@@ -1823,7 +1817,7 @@ if (-not $SkipExecution) {
         $script:UserConfig = Import-PowerShellDataFile $UserConfigFile
         $script:Config = Merge-Config -SysConfig $SysConfig -UserConfig $UserConfig
     }
-    elseif ($SetupCommand -eq "install" -or $SetupCommand -eq "") {
+    elseif ($BoxCommand -eq "install" -or $BoxCommand -eq "") {
         # install: will run wizard later in Invoke-Install
         $script:UserConfig = @{}
         $script:Config = $SysConfig
@@ -1845,15 +1839,15 @@ $script:CacheDir = if ($Config.CachePath) {
     if ([System.IO.Path]::IsPathRooted($Config.CachePath)) { $Config.CachePath } 
     else { Join-Path $BaseDir $Config.CachePath }
 } else { 
-    Join-Path $BaseDir $Config.SetupPaths.Cache 
+    Join-Path $BaseDir $Config.BoxPaths.Cache 
 }
 $script:DownloadsDir = $CacheDir
 $script:TempDir = Join-Path $CacheDir "temp"
-$script:SetupToolsDir = Join-Path $BaseDir $Config.SetupPaths.Tools
+$script:BoxToolsDir = Join-Path $BaseDir $Config.BoxPaths.Tools
 
 # 7-Zip paths
-$script:SevenZipExe = Join-Path $SetupToolsDir "7z.exe"
-$script:SevenZipDll = Join-Path $SetupToolsDir "7z.dll"
+$script:SevenZipExe = Join-Path $BoxToolsDir "7z.exe"
+$script:SevenZipDll = Join-Path $BoxToolsDir "7z.dll"
 
 # All packages (merged - UserConfig.Packages first for priority)
 $script:AllPackages = if ($Config.Packages) { $Config.Packages } else { @() }
@@ -2262,17 +2256,6 @@ function Process-Package {
     Set-PackageState -Name $name -Installed $true -Files $result.Files -Dirs $result.Dirs -Envs $result.Envs
     Write-Success "Installed"
 }
-    }
-
-    if ($Item.Archive -eq "file") {
-        $result = Install-SingleFile -FilePath $archive -Name $name -ExtractRules $Item.Extract
-    } else {
-        $result = Extract-Package -Archive $archive -Name $name -ArchiveType $Item.Archive -ExtractRules $Item.Extract
-    }
-
-    Set-PackageState -Name $name -Installed $true -Files $result.Files -Dirs $result.Dirs -Envs $result.Envs
-    Write-Success "Installed"
-}
 
 function Show-PackageList {
     Write-Host ""
@@ -2358,31 +2341,31 @@ function Ensure-SevenZip {
         Write-Info "7-Zip already present"
         return
     }
-    
+
     Write-Step "Setting up 7-Zip extractor"
-    
+
     # Create directories
     $sevenZipTempDir = Join-Path $TempDir "7zip"
-    @($SetupToolsDir, $CacheDir, $TempDir, $sevenZipTempDir) | ForEach-Object {
+    @($BoxToolsDir, $CacheDir, $TempDir, $sevenZipTempDir) | ForEach-Object {
         if (-not (Test-Path $_)) { New-Item -ItemType Directory -Path $_ -Force | Out-Null }
     }
-    
+
     $ProgressPreference = 'SilentlyContinue'
-    
+
     try {
         $sevenZrPath = Join-Path $TempDir "7zr.exe"
         Invoke-WebRequest -Uri "https://www.7-zip.org/a/7zr.exe" -OutFile $sevenZrPath -UseBasicParsing
         Write-Info "Downloaded 7zr.exe"
-        
+
         $installerPath = Join-Path $TempDir "7z2501.exe"
         Invoke-WebRequest -Uri "https://github.com/ip7z/7zip/releases/download/25.01/7z2501.exe" -OutFile $installerPath -UseBasicParsing
         Write-Info "Downloaded 7z2501.exe"
-        
+
         & $sevenZrPath x $installerPath -o"$sevenZipTempDir" -y | Out-Null
-        
+
         Copy-Item (Join-Path $sevenZipTempDir "7z.exe") $SevenZipExe -Force
         Copy-Item (Join-Path $sevenZipTempDir "7z.dll") $SevenZipDll -Force
-        
+
         Write-Success "7-Zip ready"
     }
     catch {
