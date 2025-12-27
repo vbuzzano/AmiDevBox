@@ -646,12 +646,28 @@ function Install-DevBoxGlobal {
             Write-Success 'Created Scripts directory'
         }
 
-        # Step 2: Copy devbox.ps1 to global location
-        # $PSCommandPath contains the full path of the currently executing script
-        # This ensures we copy the correct file even when run via irm | iex
+        # Step 2: Download or copy devbox.ps1 to global location
+        # When run via irm | iex, $PSCommandPath is empty - we need to download
+        # When run as a local file, we can copy directly
         $targetPath = Join-Path $scriptsDir 'devbox.ps1'
-        Copy-Item $PSCommandPath $targetPath -Force
-        Write-Success "Installed devbox.ps1 to Scripts"
+
+        if ([string]::IsNullOrEmpty($PSCommandPath)) {
+            # Running via irm | iex - download the script
+            Write-Step 'Downloading devbox.ps1 from GitHub...'
+            $downloadUrl = Get-RemoteDownloadUrl
+            try {
+                Invoke-RestMethod -Uri $downloadUrl -OutFile $targetPath -ErrorAction Stop
+                Write-Success "Downloaded devbox.ps1 to Scripts"
+            }
+            catch {
+                throw "Failed to download devbox.ps1: $_"
+            }
+        }
+        else {
+            # Running as local file - copy it
+            Copy-Item $PSCommandPath $targetPath -Force
+            Write-Success "Installed devbox.ps1 to Scripts"
+        }
 
         # Step 3: Create PowerShell profile if it doesn't exist
         # $PROFILE.CurrentUserAllHosts is the profile that loads for all hosts
