@@ -336,7 +336,7 @@ function Initialize-NewProject {
         try {
             $TplPath = Join-Path $BoxPath 'tpl'
             New-Item -ItemType Directory -Path $TplPath -Force | Out-Null
-            
+
             $EnvPsUrl = 'https://github.com/vbuzzano/AmiDevBox/raw/main/tpl/.env.ps1'
             $EnvPsDest = Join-Path $TplPath '.env.ps1'
 
