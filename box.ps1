@@ -6,7 +6,7 @@
     Compiled from modular sources by build-box.ps1
 
 .NOTES
-    Compilation Date: 2025-12-27 07:36:50
+    Compilation Date: 2025-12-27 07:39:54
     Source Modules: 16
     Build System: Feature 001 - Compilation System
 #>
@@ -2167,18 +2167,8 @@ function Process-Package {
 
         if ($useExisting -ne "Y") {
             Write-Success "Using $sourceLabel $name"
-
-            # If env var based, ensure it's set
-            if ($detection.Source -eq "env" -and $Item.Extract) {
-                $envs = @{}
-                foreach ($rule in $Item.Extract) {
-                    if ($rule -match ':([A-Z_]+)$') {
-                        $envs[$Matches[1]] = $detection.Path
-                    }
-                }
-                Set-PackageState -Name $name -Installed $false -Files @() -Dirs @() -Envs $envs
-            }
-
+            # Don't save any state - we're just using the existing installation
+            # The detection will find it again next time
             return
         }
         # User chose to install anyway, continue below
