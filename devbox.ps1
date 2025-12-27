@@ -331,6 +331,35 @@ function Initialize-NewProject {
             throw
         }
 
+        # Download/copy tpl/.env.ps1 from release
+        Write-Step 'Downloading .env.ps1 template'
+        try {
+            $TplPath = Join-Path $BoxPath 'tpl'
+            New-Item -ItemType Directory -Path $TplPath -Force | Out-Null
+            
+            $EnvPsUrl = 'https://github.com/vbuzzano/AmiDevBox/raw/main/tpl/.env.ps1'
+            $EnvPsDest = Join-Path $TplPath '.env.ps1'
+
+            # Try local copy first (for development), then remote download
+            $LocalTplPath = Join-Path (Split-Path -Parent $PSCommandPath) 'tpl'
+            $LocalEnvPsPath = Join-Path $LocalTplPath '.env.ps1'
+
+            if ($PSCommandPath -and (Test-Path $LocalEnvPsPath)) {
+                Copy-Item $LocalEnvPsPath $EnvPsDest -Force
+                Write-Success 'Copied: tpl/.env.ps1 to .box/'
+            }
+            else {
+                # Remote download (also used when run via irm | iex)
+                $ProgressPreference = 'SilentlyContinue'
+                Invoke-RestMethod -Uri $EnvPsUrl -OutFile $EnvPsDest -ErrorAction Stop
+                Write-Success 'Downloaded: tpl/.env.ps1 to .box/'
+            }
+        }
+        catch {
+            Write-Warning "Could not download .env.ps1 template: $_"
+            # Non-critical, continue
+        }
+
         # Generate box.config.psd1
         Write-Step 'Generating configuration file'
         $ConfigPath = Join-Path $TargetDir $Script:Config.ConfigFile
