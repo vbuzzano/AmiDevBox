@@ -6,7 +6,7 @@
     Compiled from modular sources by build-box.ps1
 
 .NOTES
-    Compilation Date: 2025-12-27 07:39:54
+    Compilation Date: 2025-12-27 07:43:37
     Source Modules: 16
     Build System: Feature 001 - Compilation System
 #>
@@ -2159,9 +2159,11 @@ function Process-Package {
     # T029: Check if package already installed via system/vendor/env (US3)
     $detection = Test-PackageInstalled -Package $Item
 
-    if ($detection.Installed) {
-        # T030: Prompt user to use existing installation
-        $sourceLabel = if ($detection.Source -eq "env") { "global" } elseif ($detection.Source -eq "vendor") { "local" } else { $detection.Source }
+    # Skip the "install anyway?" prompt for local installations (state/vendor source)
+    # Go directly to the "Local installation found" prompt instead
+    if ($detection.Installed -and $detection.Source -notin @("state", "vendor")) {
+        # T030: Prompt user to use existing installation (global/system only)
+        $sourceLabel = if ($detection.Source -eq "env") { "global" } elseif ($detection.Source -eq "command") { "system" } else { $detection.Source }
         Write-Info "Found $sourceLabel installation: $($detection.Path)"
         $useExisting = Ask-Choice "Install locally in project anyway? [y/N]"
 
