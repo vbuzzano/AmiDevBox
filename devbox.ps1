@@ -368,6 +368,16 @@ DefaultFPU=
         Track-Creation $EnvPath 'file'
         Write-Success 'Created: .env'
 
+        # Copy .env.ps1 loader script
+        Write-Step 'Creating PowerShell env loader'
+        $EnvPsPath = Join-Path $TargetDir '.env.ps1'
+        $EnvPsTemplate = Join-Path $BoxPath 'tpl\.env.ps1'
+        if (Test-Path $EnvPsTemplate) {
+            Copy-Item $EnvPsTemplate $EnvPsPath -Force
+            Track-Creation $EnvPsPath 'file'
+            Write-Success 'Created: .env.ps1'
+        }
+
         # Create directories
         Write-Step 'Creating project structure'
         foreach ($Dir in @('src', 'include', 'lib', 'bin')) {
@@ -417,15 +427,13 @@ See **.box/** directory for build system documentation.
             $SettingsPath = Join-Path $VSCodeDir 'settings.json'
             $SettingsContent = @"
 {
-  "terminal.integrated.env.windows": {
-    "DEVBOX_ENV": ".env"
+  "terminal.integrated.profiles.windows": {
+    "DevBox PowerShell": {
+      "source": "PowerShell",
+      "args": ["-NoExit", "-Command", ". ./.env.ps1"]
+    }
   },
-  "terminal.integrated.env.linux": {
-    "DEVBOX_ENV": ".env"
-  },
-  "terminal.integrated.env.osx": {
-    "DEVBOX_ENV": ".env"
-  },
+  "terminal.integrated.defaultProfile.windows": "DevBox PowerShell",
   "powershell.codeFormatting.preset": "OTBS",
   "[powershell]": {
     "editor.defaultFormatter": "ms-vscode.powershell",
@@ -568,6 +576,18 @@ DefaultFPU=
             Write-Success "Backup: $([System.IO.Path]::GetFileName($BackupPath))"
         }
 
+        # Copy .env.ps1 loader script
+        $EnvPsPath = Join-Path $CurrentDir '.env.ps1'
+        if (-not (Test-Path $EnvPsPath)) {
+            Write-Step 'Creating PowerShell env loader'
+            $EnvPsTemplate = Join-Path $BoxDir 'tpl\.env.ps1'
+            if (Test-Path $EnvPsTemplate) {
+                Copy-Item $EnvPsTemplate $EnvPsPath -Force
+                Track-Creation $EnvPsPath 'file'
+                Write-Success 'Created: .env.ps1'
+            }
+        }
+
         # Backup existing critical files ONLY if they will be overwritten
         # Currently, we only keep .env backup since others are skipped or created fresh
         # This preserves user data when adding DevBox to existing projects
@@ -604,15 +624,13 @@ DefaultFPU=
             $SettingsPath = Join-Path $VSCodeDir 'settings.json'
             $SettingsContent = @"
 {
-  "terminal.integrated.env.windows": {
-    "DEVBOX_ENV": ".env"
+  "terminal.integrated.profiles.windows": {
+    "DevBox PowerShell": {
+      "source": "PowerShell",
+      "args": ["-NoExit", "-Command", ". ./.env.ps1"]
+    }
   },
-  "terminal.integrated.env.linux": {
-    "DEVBOX_ENV": ".env"
-  },
-  "terminal.integrated.env.osx": {
-    "DEVBOX_ENV": ".env"
-  },
+  "terminal.integrated.defaultProfile.windows": "DevBox PowerShell",
   "powershell.codeFormatting.preset": "OTBS",
   "[powershell]": {
     "editor.defaultFormatter": "ms-vscode.powershell",
