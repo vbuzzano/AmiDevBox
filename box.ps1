@@ -6,7 +6,7 @@
     Compiled from modular sources by build-box.ps1
 
 .NOTES
-    Compilation Date: 2025-12-27 07:22:03
+    Compilation Date: 2025-12-27 07:36:50
     Source Modules: 16
     Build System: Feature 001 - Compilation System
 #>
@@ -40,7 +40,7 @@
 param(
     [Parameter(Position = 0)]
     [ValidateSet("install", "uninstall", "env", "pkg", "template", "help", "")]
-    [string]$Command = "install",
+    [string]$Command = "help",
 
     [Parameter(Position = 1)]
     [string]$SubCommand = "",
@@ -2161,11 +2161,12 @@ function Process-Package {
 
     if ($detection.Installed) {
         # T030: Prompt user to use existing installation
-        Write-Info "$name detected: $($detection.Source) - $($detection.Path)"
-        $useExisting = Ask-Choice "Use existing installation? [Y/n]"
+        $sourceLabel = if ($detection.Source -eq "env") { "global" } elseif ($detection.Source -eq "vendor") { "local" } else { $detection.Source }
+        Write-Info "Found $sourceLabel installation: $($detection.Path)"
+        $useExisting = Ask-Choice "Install locally in project anyway? [y/N]"
 
-        if ($useExisting -ne "N") {
-            Write-Success "Using existing $name"
+        if ($useExisting -ne "Y") {
+            Write-Success "Using $sourceLabel $name"
 
             # If env var based, ensure it's set
             if ($detection.Source -eq "env" -and $Item.Extract) {
@@ -2183,13 +2184,13 @@ function Process-Package {
         # User chose to install anyway, continue below
     }
 
-    # Already installed -> ask: Skip, Reinstall, Manual
+    # Already installed -> ask: Keep, Reinstall, Manual
     if ($isInstalled) {
-        $choice = Ask-Choice "$name already installed. [S]kip / [R]einstall / [M]anual?"
+        $choice = Ask-Choice "Local installation found. [K]eep / [R]einstall / [M]anual?"
 
         switch ($choice) {
-            "S" {
-                Write-Info "Skipped"
+            "K" {
+                Write-Info "Keeping existing local installation"
                 return
             }
             "R" {

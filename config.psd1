@@ -94,6 +94,19 @@
             )
         },
         @{
+            Name        = "Lha for Windows"
+            Url         = "https://aminet.net/util/arc/lhant.lha"
+            File        = "lhant.lha"
+            Description = "Windows version of LHA"
+            Archive     = "lha"           # zip, lha, 7z, tar.gz
+            Mode        = "auto"          # auto = install without asking
+            DetectEnv   = "LHATOOL"
+            Extract     = @(
+                "TOOL:lhant.exe:vendor/tools/lhant.exe:LHATOOL"
+                "TOOL:lhant.readme:vendor/tools"
+            )
+        }
+        @{
             Name        = "ApolloExplorer"
             Url         = "https://github.com/ronybeck/ApolloExplorer/releases/download/1.1.3/ApolloExplorer.1.1.3.zip"
             File        = "ApolloExplorer.1.1.3.zip"
@@ -120,20 +133,6 @@
             Mode        = "auto"
             Extract     = @(
                 "TOOL:*:vendor/tools/bgdbserver:GDB"
-            )
-        },
-        @{
-            Name        = "LHA for Windows"
-            SourceType  = "sourceforge"
-            Url         = "https://gnuwin32.sourceforge.net/downlinks/lha-bin-zip.php"
-            File        = "lha-1.14i-bin.zip"
-            Description = "LHA compression/decompression tool v1.14i (GnuWin32)"
-            Archive     = "zip"
-            Mode        = "auto"
-            DetectFile  = "lha.exe"
-            DetectCommand = "lha --help"
-            Extract     = @(
-                "TOOL:bin/lha.exe:vendor/tools:LHA"
             )
         }
     )
