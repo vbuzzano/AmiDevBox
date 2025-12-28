@@ -1,0 +1,14 @@
+{
+  "terminal.integrated.profiles.windows": {
+    "DevBox PowerShell": {
+      "source": "PowerShell",
+      "args": ["-NoExit", "-Command", ". ./.box/.env.ps1"]
+    }
+  },
+  "terminal.integrated.defaultProfile.windows": "DevBox PowerShell",
+  "powershell.codeFormatting.preset": "OTBS",
+  "[powershell]": {
+    "editor.defaultFormatter": "ms-vscode.powershell",
+    "editor.formatOnSave": true
+  }
+}

@@ -37,13 +37,13 @@ CC = vc
 LINK = vc
 
 # VBCC Target
-TARGET=aos68k 
+TARGET=aos68k
 C_INCL_VBCC = $(VBCC)/targets/m68k-amigaos/include
 
 # NDK 3.9
 C_INCL_NDK39 = $(NDK39)/Include/include_h
 
-# --- Includes ---	
+# --- Includes ---
 C_INCL_ALL = -I$(SRC_DIR) -I$(INCLUDE_DIR) -I$(C_INCL_NDK39)
 C_INCL_ALL = -I$(C_INCL_VBCC) -I$(C_INCL_NDK39) -I$(SRC_DIR) -I$(INCLUDE_DIR)
 
@@ -105,7 +105,7 @@ $(ASM_DIR)/%.s: $(SRC_DIR)/%.c | $(ASM_DIR)
 # Assemble .s files
 $(OBJ_DIR)/%.o: $(SRC_DIR)/%.s | $(OBJ_DIR)
 	vasmm68k_mot -Fhunk -o $@ $<
- 
+
 # --- Housekeeping ---
 clear:
 	@cls
@@ -138,23 +138,23 @@ help:
 	@echo   upload     - Upload to Vampire V4
 
 pkg-list:
-	@./setup.ps1 pkg list
+	@box pkg list
 
 pkg-update:
-	@./setup.ps1 pkg update
+	@box pkg update
 
 env-list:
-	@./setup.ps1 env list
+	@box env list
 
 env-update:
-	@./setup.ps1 pkg update
+	@box pkg update
 
 install:
-	@./setup.ps1 install
+	@box install
 
 uninstall:
-	@./setup.ps1 uninstall
-	
+	@box uninstall
+
 
 # Phony targets
 .PHONY: all help clear clean upload build rebuild pkg-list pkg-update env-list env-update install uninstall

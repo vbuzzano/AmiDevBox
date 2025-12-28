@@ -1,0 +1,10 @@
+# DevBox - Generated files and dependencies
+.box/
+vendor/
+build/
+dist/
+*.exe
+*.o
+*.lha
+*.zip
+.env

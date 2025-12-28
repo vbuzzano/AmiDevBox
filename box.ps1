@@ -6,7 +6,7 @@
     Compiled from modular sources by build-box.ps1
 
 .NOTES
-    Compilation Date: 2025-12-28 04:53:22
+    Compilation Date: 2025-12-28 05:42:32
     Source Modules: 16
     Build System: Feature 001 - Compilation System
 #>
@@ -55,7 +55,7 @@ param(
 $ErrorActionPreference = "Stop"
 
 # Version from devbox.ps1 (injected during compilation)
-$Script:BoxVersion = if ($Script:DevBoxVersion) { $Script:DevBoxVersion } else { '0.1.12'}
+$Script:BoxVersion = if ($Script:DevBoxVersion) { $Script:DevBoxVersion } else { '0.1.20'}
 
 if ($Version) {
     Write-Host "Box v$Script:BoxVersion" -ForegroundColor Cyan
@@ -68,7 +68,7 @@ if ($Version) {
 
 function Show-QuickHelp {
     Write-Host ""
-    Write-Host "Usage: setup.ps1 [command] [subcommand]" -ForegroundColor Cyan
+    Write-Host "Usage: box [command] [subcommand]" -ForegroundColor Cyan
     Write-Host ""
     Write-Host "Commands:" -ForegroundColor Yellow
     Write-Host "  install          Install all dependencies (default)" -ForegroundColor White
@@ -148,13 +148,9 @@ $script:BoxCommand = $Command
 function Invoke-Install {
     # Generate project files from templates if they don't exist
     if ($NeedsWizard) {
-        Write-Host ""
-        Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" -ForegroundColor Cyan
-        Write-Host "  Generating Files from Templates" -ForegroundColor Cyan
-        Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" -ForegroundColor Cyan
-        Write-Host ""
-
-        Invoke-BoxInit
+        if (-not (Invoke-ConfigWizard)) {
+            return
+        }
     }
 
     Write-Host ""
@@ -1892,19 +1888,15 @@ if (-not $SkipExecution) {
     if (Test-Path $UserConfigFile) {
         $script:UserConfig = Import-PowerShellDataFile $UserConfigFile
         $script:Config = Merge-Config -SysConfig $SysConfig -UserConfig $UserConfig
-        # Merge project config into $Config
-        foreach ($key in $ProjectConfig.Keys) {
-            $script:Config[$key] = $ProjectConfig[$key]
-        }
+        # Merge project config into $Config (using Merge-Hashtable for arrays concatenation)
+        $script:Config = Merge-Hashtable -Base $Config -Override $ProjectConfig
     }
     elseif ($BoxCommand -eq "install" -or $BoxCommand -eq "") {
         # install: will run wizard later in Invoke-Install
         $script:UserConfig = @{}
         $script:Config = $SysConfig
-        # Still merge project config
-        foreach ($key in $ProjectConfig.Keys) {
-            $script:Config[$key] = $ProjectConfig[$key]
-        }
+        # Merge project config (using Merge-Hashtable for arrays concatenation)
+        $script:Config = Merge-Hashtable -Base $Config -Override $ProjectConfig
         $script:NeedsWizard = $true
     }
     else {

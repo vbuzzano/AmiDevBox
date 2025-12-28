@@ -70,7 +70,7 @@ param(
 )
 
 # Version info
-$Script:DevBoxVersion = '0.1.12'
+$Script:DevBoxVersion = '0.1.20'
 
 if ($Version) {
     Write-Host "DevBox v$Script:DevBoxVersion" -ForegroundColor Cyan
@@ -419,24 +419,18 @@ function Initialize-NewProject {
             }
         }
 
-        # Create .env.ps1 directly in .box/ (NOT a template)
+        # Create .env.ps1 from template
         Write-Step 'Creating PowerShell env loader'
         $EnvPsPath = Join-Path $BoxPath '.env.ps1'
-        $EnvPsContent = @'
-# Load .env file into environment
-if (Test-Path .env) {
-    Get-Content .env | ForEach-Object {
-        if ($_ -match '^([^#=]+)=(.*)$') {
-            Set-Item "env:$($matches[1])" $matches[2]
+        $EnvPsTemplate = Join-Path $TplPath 'env.ps1.template'
+        if (Test-Path $EnvPsTemplate) {
+            Copy-Item $EnvPsTemplate -Destination $EnvPsPath -Force
+            Track-Creation $EnvPsPath 'file'
+            Write-Success 'Created: .box/.env.ps1'
         }
-    }
-}
-
-# add directory script top path
-$env:PATH = "$pwd\.box;$pwd\scripts;$env:PATH;"
-'@
-        Set-Content -Path $EnvPsPath -Value $EnvPsContent -Encoding UTF8
-        Write-Success 'Created: .box/.env.ps1'
+        else {
+            Write-Host "  ⚠️  env.ps1.template not found" -ForegroundColor Yellow
+        }
 
         # .env will be created by box.ps1 on first install
 
@@ -448,19 +442,19 @@ $env:PATH = "$pwd\.box;$pwd\scripts;$env:PATH;"
             Track-Creation $DirPath 'directory'
         }
 
-        # Create src/main.c
+        # Create src/main.c from template
         $MainCPath = Join-Path $TargetDir 'src\main.c'
-        $MainCContent = @"
-#include <stdio.h>
-
-int main(void) {
-    printf("Hello from $ProjectName!\n");
-    return 0;
-}
-"@
-        Set-Content -Path $MainCPath -Value $MainCContent -Encoding UTF8
-        Track-Creation $MainCPath 'file'
-        Write-Success 'Created: src/, docs/, scripts/, src/main.c'
+        $MainCTemplate = Join-Path $TplPath 'main.c.template'
+        if (Test-Path $MainCTemplate) {
+            $content = Get-Content $MainCTemplate -Raw -Encoding UTF8
+            $content = $content -replace '{{PROJECT_NAME}}', $ProjectName
+            Set-Content -Path $MainCPath -Value $content -Encoding UTF8
+            Track-Creation $MainCPath 'file'
+            Write-Success 'Created: src/, docs/, scripts/, src/main.c'
+        }
+        else {
+            Write-Host "  ⚠️  main.c.template not found" -ForegroundColor Yellow
+        }
 
         # VS Code integration (always create in init mode)
         Write-Step 'Configuring VS Code'
@@ -469,25 +463,15 @@ int main(void) {
         Track-Creation $VSCodeDir 'directory'
 
         $SettingsPath = Join-Path $VSCodeDir 'settings.json'
-        $SettingsContent = @"
-{
-  "terminal.integrated.profiles.windows": {
-    "DevBox PowerShell": {
-      "source": "PowerShell",
-      "args": ["-NoExit", "-Command", ". ./.env.ps1"]
-    }
-  },
-  "terminal.integrated.defaultProfile.windows": "DevBox PowerShell",
-  "powershell.codeFormatting.preset": "OTBS",
-  "[powershell]": {
-    "editor.defaultFormatter": "ms-vscode.powershell",
-    "editor.formatOnSave": true
-  }
-}
-"@
-        Set-Content -Path $SettingsPath -Value $SettingsContent -Encoding UTF8
-        Track-Creation $SettingsPath 'file'
-        Write-Success 'Created: .vscode/settings.json'
+        $SettingsTemplate = Join-Path $TplPath 'vscode-settings.json.template'
+        if (Test-Path $SettingsTemplate) {
+            Copy-Item $SettingsTemplate -Destination $SettingsPath -Force
+            Track-Creation $SettingsPath 'file'
+            Write-Success 'Created: .vscode/settings.json'
+        }
+        else {
+            Write-Host "  ⚠️  vscode-settings.json.template not found" -ForegroundColor Yellow
+        }
 
         # Generate box.psd1 at root from template (if not exists)
         Write-Step 'Creating project config'

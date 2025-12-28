@@ -18,7 +18,7 @@
     # ========================================================================
     # Makefile Template
     # ========================================================================
-    MakefileTemplate = ".box/template/Makefile.template"
+    MakefileTemplate = ".box/tpl/Makefile.template"
 
     # ========================================================================
     # Box Internal Paths
@@ -27,11 +27,6 @@
         Cache        = ".box/cache"      # Downloads and temp files
         Tools        = ".box/tools"      # Box tools (7z, acp, gdb)
     }
-
-    # ========================================================================
-    # User Config Template
-    # ========================================================================
-    UserConfigTemplate = ".box/tpl/box.config.template"
 
     # ========================================================================
     # Project Structure Paths (used in Makefile.env)
