@@ -458,26 +458,17 @@ int main(void) {
             }
         }
 
-        # Generate files from templates using box install
-        Write-Step 'Generating files from templates'
-        Push-Location $TargetDir
-        try {
-            & .\box.ps1 install
-        }
-        catch {
-            Write-Warning "Could not run box install: $_"
-        }
-        finally {
-            Pop-Location
-        }
-
         # Final success message
         Write-Title 'Project Created Successfully'
         Write-Host "  📁 Location: $TargetDir" -ForegroundColor Cyan
         Write-Host "  🚀 Next steps:" -ForegroundColor Cyan
         Write-Host "    cd $SafeName" -ForegroundColor Gray
-        Write-Host "    .\box.ps1 help" -ForegroundColor Gray
+        Write-Host "    # Edit box.psd1 to configure your project" -ForegroundColor Gray
+        Write-Host "    .\box.ps1 install" -ForegroundColor Gray
         Write-Host ''
+
+        # Change to project directory
+        Set-Location $TargetDir
 
         # Clear tracking on success
         $Script:CreatedItems = @()
