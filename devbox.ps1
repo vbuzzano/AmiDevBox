@@ -24,7 +24,7 @@
       devbox add [in existing directory]
 
     Remote installation:
-      irm https://github.com/vbuzzano/AmiDevBox/raw/main/devbox.ps1 | iex
+      irm https://github.com/vbuzzano/DevBox/raw/main/devbox.ps1 | iex
 
 .PARAMETER Mode
     Operation mode: 'init' or 'add'. Auto-detected if not specified.
@@ -40,7 +40,7 @@
 
 .EXAMPLE
     # Global installation (first time)
-    irm https://github.com/vbuzzano/AmiDevBox/raw/main/devbox.ps1 | iex
+    irm https://github.com/vbuzzano/DevBox/raw/main/devbox.ps1 | iex
 
 .EXAMPLE
     # After installation: Create new project
@@ -70,7 +70,7 @@ param(
 )
 
 # Version info
-$Script:DevBoxVersion = '0.1.3'
+$Script:DevBoxVersion = '0.1.10'
 
 if ($Version) {
     Write-Host "DevBox v$Script:DevBoxVersion" -ForegroundColor Cyan
@@ -98,7 +98,7 @@ $ProgressPreference = 'SilentlyContinue'
 # ============================================================================
 
 # Check if DevBox is installed globally
-$Script:IsInstalledGlobally = Test-Path "$env:USERPROFILE\Documents\PowerShell\Scripts\devbox.ps1"
+$Script:IsInstalledGlobally = Test-Path "$env:USERPROFILE\Documents\PowerShell\DevBox\devbox.ps1"
 $Script:HasProfileIntegration = $false
 
 if (Test-Path $PROFILE.CurrentUserAllHosts -ErrorAction SilentlyContinue) {
@@ -114,7 +114,7 @@ if (Test-Path $PROFILE.CurrentUserAllHosts -ErrorAction SilentlyContinue) {
 
 $Script:Config = @{
     Version = '0.1.0'
-    RepositoryUrl = 'https://github.com/vbuzzano/AmiDevBox.git'
+    RepositoryUrl = 'https://github.com/vbuzzano/DevBox.git'
     BoxDir = '.box'
     ConfigFile = 'box.config.psd1'
     EnvFile = '.env'
@@ -156,7 +156,7 @@ function Test-Prerequisites {
 function Get-RemoteDownloadUrl {
     # Returns URL to download devbox.ps1 from GitHub (release repository)
     $org = 'vbuzzano'
-    $repo = 'AmiDevBox'
+    $repo = 'DevBox'
     $branch = 'main'
     return "https://github.com/$org/$repo/raw/$branch/devbox.ps1"
 }
@@ -280,7 +280,7 @@ function Initialize-NewProject {
         # Download/copy box.ps1 from release
         Write-Step 'Downloading box.ps1'
         try {
-            $BoxUrl = 'https://github.com/vbuzzano/AmiDevBox/raw/main/box.ps1'
+            $BoxUrl = 'https://github.com/vbuzzano/DevBox/raw/main/box.ps1'
             $BoxDest = Join-Path $BoxPath 'box.ps1'
 
             # Try local copy first (for development), then remote download
@@ -315,7 +315,7 @@ function Initialize-NewProject {
         # Download/copy config.psd1 from release
         Write-Step 'Downloading config.psd1'
         try {
-            $ConfigUrl = 'https://github.com/vbuzzano/AmiDevBox/raw/main/config.psd1'
+            $ConfigUrl = 'https://github.com/vbuzzano/DevBox/raw/main/config.psd1'
             $ConfigDest = Join-Path $BoxPath 'config.psd1'
 
             # Try local copy first (for development), then remote download
@@ -352,18 +352,71 @@ function Initialize-NewProject {
         $TplPath = Join-Path $BoxPath 'tpl'
         New-Item -ItemType Directory -Path $TplPath -Force | Out-Null
 
-        # Try to find templates (development or release location)
-        $SourceTplPath = Join-Path (Split-Path -Parent $PSCommandPath) 'tpl'
-        if (-not (Test-Path $SourceTplPath)) {
-            # Try parent directory (release structure)
-            $SourceTplPath = Join-Path (Split-Path -Parent (Split-Path -Parent $PSCommandPath)) 'tpl'
+        # Template source priority:
+        # 1. Local devbox/tpl/ (development mode)
+        # 2. DevBox/tpl/ (installed mode)
+        # 3. GitHub download (fallback)
+
+        $SourceTplPath = $null
+
+        # Check for local dev templates
+        if ($PSCommandPath) {
+            $DevTplPath = Join-Path (Split-Path -Parent $PSCommandPath) 'tpl'
+            if (Test-Path $DevTplPath) {
+                $SourceTplPath = $DevTplPath
+            }
         }
 
-        if (Test-Path $SourceTplPath) {
+        # Check for global installed templates
+        if (-not $SourceTplPath) {
+            $GlobalTplPath = "$env:USERPROFILE\Documents\PowerShell\DevBox\tpl"
+            if (Test-Path $GlobalTplPath) {
+                $SourceTplPath = $GlobalTplPath
+            }
+        }
+
+        if ($SourceTplPath) {
+            # Copy from local or global templates
+            $copiedCount = 0
             Get-ChildItem -Path $SourceTplPath -File | ForEach-Object {
                 Copy-Item $_.FullName (Join-Path $TplPath $_.Name) -Force
+                $copiedCount++
             }
-            Write-Success "Copied: Templates to .box/tpl/"
+            Write-Success "Copied $copiedCount templates to .box/tpl/"
+        }
+        else {
+            # Fallback: Download from GitHub
+            $TemplateFiles = @(
+                'box.psd1.template',
+                'Makefile.template',
+                'Makefile.amiga.template',
+                'README.template.md',
+                'README.release.md'
+            )
+
+            $downloadedCount = 0
+            $ProgressPreference = 'SilentlyContinue'
+            foreach ($templateFile in $TemplateFiles) {
+                try {
+                    $templateUrl = "https://github.com/vbuzzano/DevBox/raw/main/tpl/$templateFile"
+                    $templateDest = Join-Path $TplPath $templateFile
+                    $response = Invoke-WebRequest -Uri $templateUrl -ErrorAction Stop
+                    if ($response.StatusCode -eq 200) {
+                        Set-Content -Path $templateDest -Value $response.Content -Encoding UTF8
+                        $downloadedCount++
+                    }
+                }
+                catch {
+                    Write-Verbose "Could not download $templateFile"
+                }
+            }
+
+            if ($downloadedCount -gt 0) {
+                Write-Success "Downloaded $downloadedCount templates to .box/tpl/"
+            }
+            else {
+                Write-Host "  ⚠️  Could not download templates" -ForegroundColor Yellow
+            }
         }
 
         # Create .env.ps1 directly in .box/ (NOT a template)
@@ -451,6 +504,10 @@ int main(void) {
                 Track-Creation $BoxPsd1Path 'file'
                 Write-Success 'Created: box.psd1'
             }
+            else {
+                Write-Host "  ⚠️  box.psd1.template not found - skipping config creation" -ForegroundColor Yellow
+                Write-Host "     You can manually create box.psd1 or run: devbox fix (future feature)" -ForegroundColor Gray
+            }
         }
 
         # Final success message
@@ -503,7 +560,7 @@ function Add-ToExistingProject {
             # Download/copy box.ps1
             Write-Step 'Downloading box.ps1'
             try {
-                $BoxUrl = 'https://github.com/vbuzzano/AmiDevBox/raw/main/box.ps1'
+                $BoxUrl = 'https://github.com/vbuzzano/DevBox/raw/main/box.ps1'
                 $BoxDest = Join-Path $BoxDir 'box.ps1'
 
                 # Try local copy first (for development), then remote download
@@ -541,7 +598,7 @@ function Add-ToExistingProject {
                 $TplPath = Join-Path $BoxDir 'tpl'
                 New-Item -ItemType Directory -Path $TplPath -Force | Out-Null
 
-                $EnvPsUrl = 'https://github.com/vbuzzano/AmiDevBox/raw/main/tpl/.env.ps1'
+                $EnvPsUrl = 'https://github.com/vbuzzano/DevBox/raw/main/tpl/.env.ps1'
                 $EnvPsDest = Join-Path $TplPath '.env.ps1'
 
                 # Try local copy first (for development), then remote download
@@ -724,19 +781,19 @@ function Install-DevBoxGlobal {
     Write-Host ''
 
     try {
-        # Step 1: Ensure Scripts directory exists
-        # PowerShell Scripts directory is: $env:USERPROFILE\Documents\PowerShell\Scripts
-        # This is a standard location that PowerShell searches for scripts
-        $scriptsDir = "$env:USERPROFILE\Documents\PowerShell\Scripts"
-        if (-not (Test-Path $scriptsDir)) {
-            New-Item -ItemType Directory -Path $scriptsDir -Force | Out-Null
-            Write-Success 'Created Scripts directory'
+        # Step 1: Create DevBox directory structure
+        # PowerShell DevBox directory is: $env:USERPROFILE\Documents\PowerShell\DevBox
+        # Contains devbox.ps1 and tpl/ subdirectory for templates
+        $DevBoxDir = "$env:USERPROFILE\Documents\PowerShell\DevBox"
+        if (-not (Test-Path $DevBoxDir)) {
+            New-Item -ItemType Directory -Path $DevBoxDir -Force | Out-Null
+            Write-Success 'Created DevBox directory'
         }
 
         # Step 2: Download or copy devbox.ps1 to global location
         # When run via irm | iex, $PSCommandPath is empty - we need to download
         # When run as a local file, we can copy directly
-        $targetPath = Join-Path $scriptsDir 'devbox.ps1'
+        $targetPath = Join-Path $DevBoxDir 'devbox.ps1'
 
         if ([string]::IsNullOrEmpty($PSCommandPath)) {
             # Running via irm | iex - download the script
@@ -753,7 +810,65 @@ function Install-DevBoxGlobal {
         else {
             # Running as local file - copy it
             Copy-Item $PSCommandPath $targetPath -Force
-            Write-Success "Installed devbox.ps1 to Scripts"
+            Write-Success "Installed devbox.ps1 to DevBox"
+        }
+
+        # Step 2.5: Download templates to DevBox/tpl/
+        Write-Step 'Downloading templates...'
+        $tplDir = Join-Path $DevBoxDir 'tpl'
+        if (-not (Test-Path $tplDir)) {
+            New-Item -ItemType Directory -Path $tplDir -Force | Out-Null
+        }
+
+        # Check if running in dev mode (local tpl/ available)
+        $localTplPath = $null
+        if ($PSCommandPath) {
+            $devTplPath = Join-Path (Split-Path -Parent $PSCommandPath) 'tpl'
+            if (Test-Path $devTplPath) {
+                $localTplPath = $devTplPath
+            }
+        }
+
+        if ($localTplPath) {
+            # Dev mode: copy from local tpl/
+            Get-ChildItem -Path $localTplPath -File | ForEach-Object {
+                Copy-Item $_.FullName (Join-Path $tplDir $_.Name) -Force
+            }
+            Write-Success 'Copied templates from local development'
+        }
+        else {
+            # Download templates from GitHub
+            $templateFiles = @(
+                'box.psd1.template',
+                'Makefile.template',
+                'Makefile.amiga.template',
+                'README.template.md',
+                'README.release.md'
+            )
+
+            $downloadedCount = 0
+            foreach ($templateFile in $templateFiles) {
+                try {
+                    $templateUrl = "https://github.com/vbuzzano/DevBox/raw/main/tpl/$templateFile"
+                    $templateDest = Join-Path $tplDir $templateFile
+                    $ProgressPreference = 'SilentlyContinue'
+                    $response = Invoke-WebRequest -Uri $templateUrl -ErrorAction Stop
+                    if ($response.StatusCode -eq 200) {
+                        Set-Content -Path $templateDest -Value $response.Content -Encoding UTF8
+                        $downloadedCount++
+                    }
+                }
+                catch {
+                    Write-Verbose "Could not download $templateFile (optional)"
+                }
+            }
+
+            if ($downloadedCount -gt 0) {
+                Write-Success "Downloaded $downloadedCount templates"
+            }
+            else {
+                Write-Host "  ⚠️  Could not download templates (will download during project init)" -ForegroundColor Yellow
+            }
         }
 
         # Step 3: Create PowerShell profile if it doesn't exist
@@ -788,7 +903,7 @@ function Install-DevBoxGlobal {
 # To uninstall: run 'devbox uninstall' (Feature 007)
 
 function devbox {
-    & "$env:USERPROFILE\Documents\PowerShell\Scripts\devbox.ps1" @args
+    & "$env:USERPROFILE\Documents\PowerShell\DevBox\devbox.ps1" @args
 }
 
 function box {
@@ -829,7 +944,7 @@ function box {
         Write-Host ''
         Write-Success 'DevBox installed globally'
         Write-Host ''
-        Write-Host "  📍 Location: $scriptsDir\devbox.ps1" -ForegroundColor Cyan
+        Write-Host "  📍 Location: $DevBoxDir" -ForegroundColor Cyan
         Write-Host ''
         Write-Host '  Next steps:' -ForegroundColor Yellow
         Write-Host '    1. Open a new PowerShell window' -ForegroundColor White
@@ -957,3 +1072,4 @@ function Main {
 
 # Run main
 Main
+

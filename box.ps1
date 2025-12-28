@@ -6,7 +6,7 @@
     Compiled from modular sources by build-box.ps1
 
 .NOTES
-    Compilation Date: 2025-12-28 04:01:43
+    Compilation Date: 2025-12-28 04:46:32
     Source Modules: 16
     Build System: Feature 001 - Compilation System
 #>
@@ -48,10 +48,19 @@ param(
     [Parameter(Position = 2, ValueFromRemainingArguments = $true)]
     [string[]]$Args,
 
-    [switch]$Help
+    [switch]$Help,
+    [switch]$Version
 )
 
 $ErrorActionPreference = "Stop"
+
+# Version from devbox.ps1 (injected during compilation)
+$Script:BoxVersion = if ($Script:DevBoxVersion) { $Script:DevBoxVersion } else { '0.1.10'}
+
+if ($Version) {
+    Write-Host "Box v$Script:BoxVersion" -ForegroundColor Cyan
+    exit 0
+}
 
 # ============================================================================
 # Quick Help (before loading config)
