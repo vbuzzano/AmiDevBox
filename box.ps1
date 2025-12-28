@@ -6,7 +6,7 @@
     Compiled from modular sources by build-box.ps1
 
 .NOTES
-    Compilation Date: 2025-12-27 08:54:17
+    Compilation Date: 2025-12-28 01:39:09
     Source Modules: 16
     Build System: Feature 001 - Compilation System
 #>
@@ -39,7 +39,7 @@
 
 param(
     [Parameter(Position = 0)]
-    [ValidateSet("install", "uninstall", "env", "pkg", "template", "help", "")]
+    [ValidateSet("init", "install", "uninstall", "env", "pkg", "template", "help", "")]
     [string]$Command = "help",
 
     [Parameter(Position = 1)]
@@ -137,11 +137,15 @@ $script:BoxCommand = $Command
 # ============================================================================
 
 function Invoke-Install {
-    # Run wizard if config doesn't exist
+    # Generate project files from templates if they don't exist
     if ($NeedsWizard) {
-        if (-not (Invoke-ConfigWizard)) {
-            return
-        }
+        Write-Host ""
+        Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" -ForegroundColor Cyan
+        Write-Host "  Generating Files from Templates" -ForegroundColor Cyan
+        Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" -ForegroundColor Cyan
+        Write-Host ""
+
+        Invoke-BoxInit
     }
 
     Write-Host ""
@@ -272,7 +276,7 @@ function Invoke-EnvUpdate {
 
     # Verbose info
     if ($VerbosePreference -eq 'Continue') {
-        Write-Verbose "Template directory: .box/templates/"
+        Write-Verbose "Template directory: .box/tpl/"
         Write-Verbose "Variable sources: .env, box.config.psd1"
     }
 
@@ -291,10 +295,10 @@ function Invoke-EnvUpdate {
     }
 
     # Get available templates
-    $templates = Get-AvailableTemplates -TemplateDir '.box/templates'
+    $templates = Get-AvailableTemplates -TemplateDir '.box/tpl'
 
     if ($templates.Count -eq 0) {
-        Write-Host "  [INFO] No templates found in .box/templates/" -ForegroundColor Cyan
+        Write-Host "  [INFO] No templates found in .box/tpl/" -ForegroundColor Cyan
         return
     }
 
@@ -311,12 +315,12 @@ function Invoke-EnvUpdate {
         $actualTemplate = $null
 
         # Try: output_name.template (e.g., Makefile.template)
-        if (Test-Path ".box/templates/$template.template" -PathType Leaf) {
-            $actualTemplate = Get-Item ".box/templates/$template.template"
+        if (Test-Path ".box/tpl/$template.template" -PathType Leaf) {
+            $actualTemplate = Get-Item ".box/tpl/$template.template"
         }
         else {
             # Try: output_name_without_ext.template.ext (e.g., README.template.md)
-            $templateWithExt = ".box/templates/$($template -split '\.' | Select-Object -First 1).template.$($template -split '\.' | Select-Object -Last 1)"
+            $templateWithExt = ".box/tpl/$($template -split '\.' | Select-Object -First 1).template.$($template -split '\.' | Select-Object -Last 1)"
             if (Test-Path $templateWithExt -PathType Leaf) {
                 $actualTemplate = Get-Item $templateWithExt
             }
@@ -422,17 +426,17 @@ function Invoke-TemplateApply {
 
     # Normalize template name (add .template if missing)
     if (-not $Template.EndsWith('.template')) {
-        $templatePath = ".box/templates/$Template.template"
+        $templatePath = ".box/tpl/$Template.template"
         $outputPath = $Template
     }
     else {
-        $templatePath = ".box/templates/$Template"
+        $templatePath = ".box/tpl/$Template"
         $outputPath = $Template -replace '\.template$', ''
     }
 
     # Check if template exists
     if (-not (Test-Path $templatePath)) {
-        $available = Get-AvailableTemplates -TemplateDir '.box/templates'
+        $available = Get-AvailableTemplates -TemplateDir '.box/tpl'
         Write-Host "  [ERR] Template not found: $Template" -ForegroundColor Red
         Write-Host ""
         Write-Host "Available templates:" -ForegroundColor Yellow
@@ -492,6 +496,23 @@ function Invoke-TemplateApply {
     }
 
     Write-Host ""
+}
+
+function Invoke-Init {
+    <#
+    .SYNOPSIS
+        Generate missing project files from templates
+
+    .DESCRIPTION
+        Calls Invoke-BoxInit from templates.ps1 module to generate
+        README.md, box.config.psd1, and other files from .box/tpl/ templates.
+        Only creates missing files - safe to re-run.
+
+    .EXAMPLE
+        box init
+    #>
+
+    Invoke-BoxInit
 }
 
 
@@ -809,7 +830,7 @@ function Ask-Path {
 # Common filenames (can be referenced by other scripts)
 $script:ConfigFileName = 'config.psd1'
 $script:UserConfigFileName = 'box.config.psd1'
-$script:MakefileTemplateName = '.box/template/Makefile.template'
+$script:MakefileTemplateName = '.box/tpl/Makefile.template'
 
 function Get-IncPath {
     param([string]$Name)
@@ -1240,18 +1261,35 @@ function Generate-DotEnvFile {
     )
 
     # Project settings from merged config
+    # Support both flat keys (PROJECT_NAME) and nested (Project.Name)
+    if ($Config.PROJECT_NAME) {
+        $lines += "PROJECT_NAME=$($Config.PROJECT_NAME)"
+        $programName = if ($Config.PROGRAM_NAME) { $Config.PROGRAM_NAME } else { $Config.PROJECT_NAME }
+        $lines += "PROGRAM_NAME=$programName"
+    } elseif ($Config.Project -and $Config.Project.Name) {
+        $lines += "PROJECT_NAME=$($Config.Project.Name)"
+        $lines += "PROGRAM_NAME=$($Config.Project.Name)"
+    }
+
+    if ($Config.DESCRIPTION) {
+        $lines += "DESCRIPTION=$($Config.DESCRIPTION)"
+    } elseif ($Config.Project -and $Config.Project.Description) {
+        $lines += "DESCRIPTION=$($Config.Project.Description)"
+    }
+
+    if ($Config.VERSION) {
+        $lines += "VERSION=$($Config.VERSION)"
+    } elseif ($Config.Project -and $Config.Project.Version) {
+        $lines += "VERSION=$($Config.Project.Version)"
+    }
+
+    # CPU/FPU from nested config only
     if ($Config.Project) {
-        if ($Config.Project.Name) {
-            $lines += "PROGRAM_NAME=$($Config.Project.Name)"
-        }
         if ($Config.Project.DefaultCPU) {
             $lines += "DEFAULT_CPU=$($Config.Project.DefaultCPU)"
         }
         if ($Config.Project.DefaultFPU) {
             $lines += "DEFAULT_FPU=$($Config.Project.DefaultFPU)"
-        }
-        if ($Config.Project.Version) {
-            $lines += "VERSION=$($Config.Project.Version)"
         }
     }
 
@@ -1805,6 +1843,9 @@ $script:SysConfig = Import-PowerShellDataFile $SysConfigFile
 $script:UserConfigFile = Join-Path $BaseDir $USER_CONFIG_FILENAME
 $script:UserConfigTemplate = Join-Path $BaseDir $SysConfig.UserConfigTemplate
 
+# Project config (created by devbox init with PROJECT_NAME, DESCRIPTION)
+$script:ProjectConfigFile = Join-Path $BoxDir 'project.psd1'
+
 # Handle missing user config based on command
 $script:SkipExecution = $false
 $script:StateExists = Test-Path (Join-Path $BaseDir $STATE_FILENAME)
@@ -1822,14 +1863,28 @@ if ($BoxCommand -in @("uninstall", "env", "pkg")) {
 
 # Load config if not skipping
 if (-not $SkipExecution) {
+    # Load project config if exists
+    $script:ProjectConfig = @{}
+    if (Test-Path $ProjectConfigFile) {
+        $script:ProjectConfig = Import-PowerShellDataFile $ProjectConfigFile
+    }
+
     if (Test-Path $UserConfigFile) {
         $script:UserConfig = Import-PowerShellDataFile $UserConfigFile
         $script:Config = Merge-Config -SysConfig $SysConfig -UserConfig $UserConfig
+        # Merge project config into $Config
+        foreach ($key in $ProjectConfig.Keys) {
+            $script:Config[$key] = $ProjectConfig[$key]
+        }
     }
     elseif ($BoxCommand -eq "install" -or $BoxCommand -eq "") {
         # install: will run wizard later in Invoke-Install
         $script:UserConfig = @{}
         $script:Config = $SysConfig
+        # Still merge project config
+        foreach ($key in $ProjectConfig.Keys) {
+            $script:Config[$key] = $ProjectConfig[$key]
+        }
         $script:NeedsWizard = $true
     }
     else {
@@ -2463,17 +2518,17 @@ function Get-ConfigBoxVariables {
         Supports nested keys (converts to uppercase with _ prefix).
 
     .PARAMETER ConfigPath
-        Path to config.psd1 file. Defaults to box.config.psd1 in current directory.
+        Path to config.psd1 file. Defaults to .box/project.psd1 in current directory.
 
     .OUTPUTS
-        [hashtable] Configuration variables from box.config.psd1
+        [hashtable] Configuration variables from .box/project.psd1
 
     .EXAMPLE
         $config = Get-ConfigBoxVariables
         # Returns: @{ PROJECT_NAME = "MyProject"; VERSION = "0.1.0" }
     #>
     param(
-        [string]$ConfigPath = 'box.config.psd1'
+        [string]$ConfigPath = '.box/project.psd1'
     )
 
     $variables = @{}
@@ -2939,13 +2994,13 @@ $suffix
 function Get-AvailableTemplates {
     <#
     .SYNOPSIS
-        List all available template files in .box/templates/
+        List all available template files in .box/tpl/
 
     .DESCRIPTION
-        Discovers all .template files in .box/templates/ directory.
+        Discovers all .template files in .box/tpl/ directory.
 
     .PARAMETER TemplateDir
-        Path to templates directory. Defaults to .box/templates/
+        Path to templates directory. Defaults to .box/tpl/
 
     .OUTPUTS
         [array] Array of template filenames (without .template extension)
@@ -2955,7 +3010,7 @@ function Get-AvailableTemplates {
         # Returns: @( "Makefile", "README.md", "Makefile.amiga" )
     #>
     param(
-        [string]$TemplateDir = '.box/templates'
+        [string]$TemplateDir = '.box/tpl'
     )
 
     $templates = @()
@@ -2976,6 +3031,116 @@ function Get-AvailableTemplates {
     }
 
     return $templates
+}
+
+# ============================================================================
+# BOX INIT - GENERATE FILES FROM TEMPLATES
+# ============================================================================
+
+function Invoke-BoxInit {
+    <#
+    .SYNOPSIS
+        Generate project files from .box/tpl/ templates
+
+    .DESCRIPTION
+        Reads template files from .box/tpl/ and generates corresponding files
+        in the project root. Replaces {{TOKEN}} placeholders with values from
+        box.config.psd1 and .env.
+
+        Only creates missing files - safe to re-run without overwriting existing files.
+
+    .EXAMPLE
+        Invoke-BoxInit
+        Generates all missing files from templates
+    #>
+
+    Write-Host ""
+    Write-Host "━" * 60 -ForegroundColor DarkCyan
+    Write-Host "  Generating Files from Templates" -ForegroundColor Cyan
+    Write-Host "━" * 60 -ForegroundColor DarkCyan
+
+    # Check if we're in a project with .box/
+    if (-not (Test-Path ".box")) {
+        Write-Host "  ❌ Not in a DevBox project (no .box/ directory found)" -ForegroundColor Red
+        Write-Host "  Run 'devbox init' to create a new project" -ForegroundColor Gray
+        return
+    }
+
+    # Load configuration
+    $configVars = Get-ConfigBoxVariables
+
+    # Load environment variables
+    $envVars = Get-TemplateVariables
+
+    # Merge both (env overrides config)
+    $allVars = $configVars.Clone()
+    foreach ($key in $envVars.Keys) {
+        $allVars[$key] = $envVars[$key]
+    }
+
+    # Find all template files
+    $templatePath = ".box/tpl"
+    if (-not (Test-Path $templatePath)) {
+        Write-Host "  ❌ Template directory not found: $templatePath" -ForegroundColor Red
+        return
+    }
+
+    $templates = Get-ChildItem -Path $templatePath -Filter "*.template*" -File
+    if ($templates.Count -eq 0) {
+        Write-Warning "No template files found in $templatePath"
+        return
+    }
+
+    Write-Host ""
+    $generated = 0
+    $skipped = 0
+
+    foreach ($template in $templates) {
+        # Determine output filename and path
+        $outputName = $template.Name -replace '\.template', ''
+        
+        # box.config goes to .box/, other files to project root
+        if ($outputName -eq 'box.config') {
+            $outputPath = Join-Path '.box' $outputName
+        } else {
+            $outputPath = Join-Path (Get-Location) $outputName
+        }
+
+        # Skip if file already exists
+        if (Test-Path $outputPath) {
+            Write-Host "  ⏭️  Skipping $outputName (already exists)" -ForegroundColor Gray
+            $skipped++
+            continue
+        }
+
+        # Read template content
+        $content = Get-Content $template.FullName -Raw -Encoding UTF8
+
+        # Replace all {{TOKEN}} placeholders
+        foreach ($key in $allVars.Keys) {
+            $content = $content -replace "{{$key}}", $allVars[$key]
+        }
+
+        # Write output file
+        try {
+            Set-Content -Path $outputPath -Value $content -Encoding UTF8 -NoNewline
+            Write-Host "  ✅ Generated $outputName" -ForegroundColor Green
+            $generated++
+        }
+        catch {
+            Write-Host "  ❌ Failed to create $outputName`: $_" -ForegroundColor Red
+        }
+    }
+
+    Write-Host ""
+    Write-Host "━" * 60 -ForegroundColor DarkCyan
+    Write-Host "  Summary: $generated generated, $skipped skipped" -ForegroundColor Cyan
+    Write-Host "━" * 60 -ForegroundColor DarkCyan
+
+    if ($generated -eq 0 -and $skipped -gt 0) {
+        Write-Host ""
+        Write-Host "  💡 All files already exist. Use 'box env update' to regenerate." -ForegroundColor Yellow
+    }
 }
 
 
@@ -3111,6 +3276,9 @@ if ($SkipExecution) {
 # ============================================================================
 
 switch ($Command) {
+    "init" {
+        Invoke-Init
+    }
     "install" {
         Invoke-Install
     }

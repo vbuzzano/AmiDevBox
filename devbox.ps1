@@ -343,126 +343,89 @@ function Initialize-NewProject {
             throw
         }
 
-        # Download/copy tpl/.env.ps1 from release
-        Write-Step 'Downloading .env.ps1 template'
-        try {
-            $TplPath = Join-Path $BoxPath 'tpl'
-            New-Item -ItemType Directory -Path $TplPath -Force | Out-Null
+        # Create templates directory and copy templates
+        Write-Step 'Copying templates'
+        $TplPath = Join-Path $BoxPath 'tpl'
+        New-Item -ItemType Directory -Path $TplPath -Force | Out-Null
 
-            $EnvPsUrl = 'https://github.com/vbuzzano/AmiDevBox/raw/main/tpl/.env.ps1'
-            $EnvPsDest = Join-Path $TplPath '.env.ps1'
-
-            # Try local copy first (for development), then remote download
-            $LocalTplPath = Join-Path (Split-Path -Parent $PSCommandPath) 'tpl'
-            $LocalEnvPsPath = Join-Path $LocalTplPath '.env.ps1'
-
-            if ($PSCommandPath -and (Test-Path $LocalEnvPsPath)) {
-                Copy-Item $LocalEnvPsPath $EnvPsDest -Force
-                Write-Success 'Copied: tpl/.env.ps1 to .box/'
+        # Create templates directory and copy templates
+        Write-Step 'Copying templates'
+        $TplPath = Join-Path $BoxPath 'tpl'
+        New-Item -ItemType Directory -Path $TplPath -Force | Out-Null
+        
+        # Find template source (development or release)
+        $SourceTplPath = $null
+        if ($PSCommandPath) {
+            # Try adjacent to devbox.ps1 first (development: devbox/tpl/)
+            $devPath = Join-Path (Split-Path -Parent $PSCommandPath) 'tpl'
+            if (Test-Path $devPath) {
+                $SourceTplPath = $devPath
             }
             else {
-                # Remote download (also used when run via irm | iex)
-                $ProgressPreference = 'SilentlyContinue'
-                $response = Invoke-WebRequest -Uri $EnvPsUrl -ErrorAction Stop
-                if ($response.StatusCode -eq 200) {
-                    Set-Content -Path $EnvPsDest -Value $response.Content -Encoding UTF8
-                    Write-Success 'Downloaded: tpl/.env.ps1 to .box/'
-                }
-                else {
-                    throw "HTTP $($response.StatusCode)"
+                # Try release location (tpl/ at same level as devbox.ps1)
+                $releasePath = Join-Path (Split-Path -Parent $PSCommandPath) '..\tpl'
+                if (Test-Path $releasePath) {
+                    $SourceTplPath = Resolve-Path $releasePath
                 }
             }
         }
-        catch {
-            Write-Warning "Could not download .env.ps1 template: $_"
-            # Non-critical, continue
+        
+        if ($SourceTplPath -and (Test-Path $SourceTplPath)) {
+            # Copy all template files except .env.ps1 and documentation
+            Get-ChildItem -Path $SourceTplPath -File | Where-Object {
+                $_.Name -ne '.env.ps1' -and $_.Name -ne 'README.release.md'
+            } | ForEach-Object {
+                $destPath = Join-Path $TplPath $_.Name
+                Copy-Item $_.FullName $destPath -Force
+            }
+            Write-Success "Copied: Templates to .box/tpl/"
+        }
+        else {
+            Write-Warning "Template source not found - skipping template copy"
         }
 
-        # Generate box.config.psd1
-        Write-Step 'Generating configuration file'
-        $ConfigPath = Join-Path $TargetDir $Script:Config.ConfigFile
-        $TemplateConfig = @"
-@{
-    Name = '$ProjectName'
-    Description = '$Description'
-    ProgramName = '$SafeName'
-    Version = '0.1.0'
-    DefaultCPU = 'm68020'
-    DefaultFPU = ''
-}
-"@
-        Set-Content -Path $ConfigPath -Value $TemplateConfig -Encoding UTF8
-        Track-Creation $ConfigPath 'file'
-        Write-Success "Generated: box.config.psd1"
-
-        # Create .env file
-        Write-Step 'Creating environment file'
-        $EnvPath = Join-Path $TargetDir $Script:Config.EnvFile
-        $EnvContent = @"
-# DevBox environment - $ProjectName
-# Generated: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')
-
-# Project
-PROJECT_NAME=$ProjectName
-PROGRAM_NAME=$SafeName
-VERSION=0.1.0
-
-# Amiga Development
-DefaultCPU=m68020
-DefaultFPU=
-"@
-        Set-Content -Path $EnvPath -Value $EnvContent -Encoding UTF8
-        Track-Creation $EnvPath 'file'
-        Write-Success 'Created: .env'
-
-        # Copy .env.ps1 loader script
+        # Create .env.ps1 directly in .box/ (NOT a template)
         Write-Step 'Creating PowerShell env loader'
-        $EnvPsPath = Join-Path $TargetDir '.env.ps1'
-        $EnvPsTemplate = Join-Path $BoxPath 'tpl\.env.ps1'
-        if (Test-Path $EnvPsTemplate) {
-            Copy-Item $EnvPsTemplate $EnvPsPath -Force
-            Track-Creation $EnvPsPath 'file'
-            Write-Success 'Created: .env.ps1'
+        $EnvPsPath = Join-Path $BoxPath '.env.ps1'
+        $EnvPsContent = @'
+# Load .env file into environment
+if (Test-Path .env) {
+    Get-Content .env | ForEach-Object {
+        if ($_ -match '^([^#=]+)=(.*)$') {
+            Set-Item "env:$($matches[1])" $matches[2]
         }
+    }
+}
+
+# Add .box and scripts to PATH
+$env:PATH = "$pwd\.box;$pwd\scripts;$env:PATH;"
+'@
+        Set-Content -Path $EnvPsPath -Value $EnvPsContent -Encoding UTF8
+        Write-Success 'Created: .box/.env.ps1'
+
+        # .env will be created by box.ps1 on first install
 
         # Create directories
         Write-Step 'Creating project structure'
-        foreach ($Dir in @('src', 'include', 'lib', 'bin')) {
+        foreach ($Dir in @('src', 'include', 'lib', 'bin', 'docs', 'scripts')) {
             $DirPath = Join-Path $TargetDir $Dir
             New-Item -ItemType Directory -Path $DirPath -Force | Out-Null
             Track-Creation $DirPath 'directory'
         }
-        Write-Success 'Created: src/, include/, lib/, bin/'
 
-        # Create README.md
-        Write-Step 'Generating README'
-        $ReadmePath = Join-Path $TargetDir 'README.md'
-        $ReadmeContent = @"
-# $ProjectName
+        # Create src/main.c
+        $MainCPath = Join-Path $TargetDir 'src\main.c'
+        $MainCContent = @"
+#include <stdio.h>
 
-$Description
-
-## Project Structure
-
-- **src/**: Source code
-- **include/**: Header files
-- **lib/**: Libraries
-- **bin/**: Compiled binaries
-- **.box/**: DevBox development tools
-
-## Getting Started
-
-1. Review configuration: \`box.config.psd1\`
-2. Load environment: \`. .\.env.ps1\` (in PowerShell)
-3. Build: \`box build\` (or \`make\` if configured)
-
-## Documentation
-
-See **.box/** directory for build system documentation.
+int main(void) {
+    printf("Hello from $ProjectName!\n");
+    return 0;
+}
 "@
-        Set-Content -Path $ReadmePath -Value $ReadmeContent -Encoding UTF8
-        Track-Creation $ReadmePath 'file'
-        Write-Success 'Generated: README.md'
+        Set-Content -Path $MainCPath -Value $MainCContent -Encoding UTF8
+        Track-Creation $MainCPath 'file'
+        Write-Success 'Created: src/, include/, lib/, bin/, docs/, scripts/, src/main.c'
 
         # VS Code integration (always create in init mode)
         Write-Step 'Configuring VS Code'
@@ -498,6 +461,34 @@ See **.box/** directory for build system documentation.
         if (Test-Path $SourceBox) {
             Copy-Item $SourceBox $TargetBox -Force
             Write-Success 'Copied: box.ps1 to root'
+        }
+
+        # Create .box/project.psd1 with project metadata for templates
+        Write-Step 'Creating project config'
+        $ProjectConfigPath = Join-Path $BoxPath 'project.psd1'
+        $ProjectConfigContent = @"
+@{
+    PROJECT_NAME = '$ProjectName'
+    DESCRIPTION = '$Description'
+    PROGRAM_NAME = '$ProjectName'
+    VERSION = '0.1.0'
+}
+"@
+        Set-Content -Path $ProjectConfigPath -Value $ProjectConfigContent -Encoding UTF8
+        Track-Creation $ProjectConfigPath 'file'
+        Write-Success 'Created: .box/project.psd1'
+
+        # Generate files from templates using box install
+        Write-Step 'Generating files from templates'
+        Push-Location $TargetDir
+        try {
+            & .\box.ps1 install
+        }
+        catch {
+            Write-Warning "Could not run box install: $_"
+        }
+        finally {
+            Pop-Location
         }
 
         # Final success message

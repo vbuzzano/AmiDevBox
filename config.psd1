@@ -31,7 +31,7 @@
     # ========================================================================
     # User Config Template
     # ========================================================================
-    UserConfigTemplate = ".box/template/box.config.template"
+    UserConfigTemplate = ".box/tpl/box.config.template"
 
     # ========================================================================
     # Project Structure Paths (used in Makefile.env)
