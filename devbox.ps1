@@ -65,8 +65,17 @@
 
 param(
     [Parameter(Position=0, ValueFromRemainingArguments=$true)]
-    [object[]]$Arguments
+    [object[]]$Arguments,
+    [switch]$Version
 )
+
+# Version info
+$Script:DevBoxVersion = '0.1.0'
+
+if ($Version) {
+    Write-Host "DevBox v$Script:DevBoxVersion" -ForegroundColor Cyan
+    exit 0
+}
 
 # Parse arguments (support for both direct call and irm | iex)
 $Mode = ''
@@ -140,14 +149,8 @@ function Write-Error-Custom {
 }
 
 function Test-Prerequisites {
-    # Check if git is installed
-    if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
-        Write-Error-Custom 'git is not installed'
-        Write-Host ''
-        Write-Host '  Download from: https://git-scm.com/download/win' -ForegroundColor Yellow
-        exit 1
-    }
-    Write-Success 'git is installed'
+    # No prerequisites for devbox init
+    # (git not required for project creation)
 }
 
 function Get-RemoteDownloadUrl {
@@ -878,7 +881,7 @@ function Main {
     }
 
     Write-Host ''
-    Write-Host '🧙 DevBox Bootstrap v0.1.0' -ForegroundColor Cyan
+    Write-Host "🧿 DevBox Bootstrap v$Script:DevBoxVersion" -ForegroundColor Cyan
     Write-Host ''
 
     try {
