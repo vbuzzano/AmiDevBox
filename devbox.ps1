@@ -24,7 +24,7 @@
       devbox add [in existing directory]
 
     Remote installation:
-      irm https://github.com/vbuzzano/DevBox/raw/main/devbox.ps1 | iex
+      irm https://github.com/vbuzzano/AmiDevBox/raw/main/devbox.ps1 | iex
 
 .PARAMETER Mode
     Operation mode: 'init' or 'add'. Auto-detected if not specified.
@@ -40,7 +40,7 @@
 
 .EXAMPLE
     # Global installation (first time)
-    irm https://github.com/vbuzzano/DevBox/raw/main/devbox.ps1 | iex
+    irm https://github.com/vbuzzano/AmiDevBox/raw/main/devbox.ps1 | iex
 
 .EXAMPLE
     # After installation: Create new project
@@ -70,7 +70,7 @@ param(
 )
 
 # Version info
-$Script:DevBoxVersion = '0.1.10'
+$Script:DevBoxVersion = '0.1.12'
 
 if ($Version) {
     Write-Host "DevBox v$Script:DevBoxVersion" -ForegroundColor Cyan
@@ -114,7 +114,7 @@ if (Test-Path $PROFILE.CurrentUserAllHosts -ErrorAction SilentlyContinue) {
 
 $Script:Config = @{
     Version = '0.1.0'
-    RepositoryUrl = 'https://github.com/vbuzzano/DevBox.git'
+    RepositoryUrl = 'https://github.com/vbuzzano/AmiDevBox.git'
     BoxDir = '.box'
     ConfigFile = 'box.config.psd1'
     EnvFile = '.env'
@@ -156,7 +156,7 @@ function Test-Prerequisites {
 function Get-RemoteDownloadUrl {
     # Returns URL to download devbox.ps1 from GitHub (release repository)
     $org = 'vbuzzano'
-    $repo = 'DevBox'
+    $repo = 'AmiDevBox'
     $branch = 'main'
     return "https://github.com/$org/$repo/raw/$branch/devbox.ps1"
 }
@@ -280,7 +280,7 @@ function Initialize-NewProject {
         # Download/copy box.ps1 from release
         Write-Step 'Downloading box.ps1'
         try {
-            $BoxUrl = 'https://github.com/vbuzzano/DevBox/raw/main/box.ps1'
+            $BoxUrl = 'https://github.com/vbuzzano/AmiDevBox/raw/main/box.ps1'
             $BoxDest = Join-Path $BoxPath 'box.ps1'
 
             # Try local copy first (for development), then remote download
@@ -315,7 +315,7 @@ function Initialize-NewProject {
         # Download/copy config.psd1 from release
         Write-Step 'Downloading config.psd1'
         try {
-            $ConfigUrl = 'https://github.com/vbuzzano/DevBox/raw/main/config.psd1'
+            $ConfigUrl = 'https://github.com/vbuzzano/AmiDevBox/raw/main/config.psd1'
             $ConfigDest = Join-Path $BoxPath 'config.psd1'
 
             # Try local copy first (for development), then remote download
@@ -398,7 +398,7 @@ function Initialize-NewProject {
             $ProgressPreference = 'SilentlyContinue'
             foreach ($templateFile in $TemplateFiles) {
                 try {
-                    $templateUrl = "https://github.com/vbuzzano/DevBox/raw/main/tpl/$templateFile"
+                    $templateUrl = "https://github.com/vbuzzano/AmiDevBox/raw/main/tpl/$templateFile"
                     $templateDest = Join-Path $TplPath $templateFile
                     $response = Invoke-WebRequest -Uri $templateUrl -ErrorAction Stop
                     if ($response.StatusCode -eq 200) {
@@ -560,7 +560,7 @@ function Add-ToExistingProject {
             # Download/copy box.ps1
             Write-Step 'Downloading box.ps1'
             try {
-                $BoxUrl = 'https://github.com/vbuzzano/DevBox/raw/main/box.ps1'
+                $BoxUrl = 'https://github.com/vbuzzano/AmiDevBox/raw/main/box.ps1'
                 $BoxDest = Join-Path $BoxDir 'box.ps1'
 
                 # Try local copy first (for development), then remote download
@@ -598,7 +598,7 @@ function Add-ToExistingProject {
                 $TplPath = Join-Path $BoxDir 'tpl'
                 New-Item -ItemType Directory -Path $TplPath -Force | Out-Null
 
-                $EnvPsUrl = 'https://github.com/vbuzzano/DevBox/raw/main/tpl/.env.ps1'
+                $EnvPsUrl = 'https://github.com/vbuzzano/AmiDevBox/raw/main/tpl/.env.ps1'
                 $EnvPsDest = Join-Path $TplPath '.env.ps1'
 
                 # Try local copy first (for development), then remote download
@@ -849,7 +849,7 @@ function Install-DevBoxGlobal {
             $downloadedCount = 0
             foreach ($templateFile in $templateFiles) {
                 try {
-                    $templateUrl = "https://github.com/vbuzzano/DevBox/raw/main/tpl/$templateFile"
+                    $templateUrl = "https://github.com/vbuzzano/AmiDevBox/raw/main/tpl/$templateFile"
                     $templateDest = Join-Path $tplDir $templateFile
                     $ProgressPreference = 'SilentlyContinue'
                     $response = Invoke-WebRequest -Uri $templateUrl -ErrorAction Stop
@@ -1072,4 +1072,5 @@ function Main {
 
 # Run main
 Main
+
 

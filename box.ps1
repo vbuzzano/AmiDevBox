@@ -6,7 +6,7 @@
     Compiled from modular sources by build-box.ps1
 
 .NOTES
-    Compilation Date: 2025-12-28 04:46:32
+    Compilation Date: 2025-12-28 04:53:22
     Source Modules: 16
     Build System: Feature 001 - Compilation System
 #>
@@ -55,7 +55,7 @@ param(
 $ErrorActionPreference = "Stop"
 
 # Version from devbox.ps1 (injected during compilation)
-$Script:BoxVersion = if ($Script:DevBoxVersion) { $Script:DevBoxVersion } else { '0.1.10'}
+$Script:BoxVersion = if ($Script:DevBoxVersion) { $Script:DevBoxVersion } else { '0.1.12'}
 
 if ($Version) {
     Write-Host "Box v$Script:BoxVersion" -ForegroundColor Cyan
