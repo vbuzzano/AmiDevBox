@@ -347,14 +347,14 @@ function Initialize-NewProject {
         Write-Step 'Copying templates'
         $TplPath = Join-Path $BoxPath 'tpl'
         New-Item -ItemType Directory -Path $TplPath -Force | Out-Null
-        
+
         # Try to find templates (development or release location)
         $SourceTplPath = Join-Path (Split-Path -Parent $PSCommandPath) 'tpl'
         if (-not (Test-Path $SourceTplPath)) {
             # Try parent directory (release structure)
             $SourceTplPath = Join-Path (Split-Path -Parent (Split-Path -Parent $PSCommandPath)) 'tpl'
         }
-        
+
         if (Test-Path $SourceTplPath) {
             Get-ChildItem -Path $SourceTplPath -File | ForEach-Object {
                 Copy-Item $_.FullName (Join-Path $TplPath $_.Name) -Force
@@ -375,7 +375,7 @@ if (Test-Path .env) {
     }
 }
 
-# Add .box and scripts to PATH
+# add directory script top path
 $env:PATH = "$pwd\.box;$pwd\scripts;$env:PATH;"
 '@
         Set-Content -Path $EnvPsPath -Value $EnvPsContent -Encoding UTF8
@@ -385,7 +385,7 @@ $env:PATH = "$pwd\.box;$pwd\scripts;$env:PATH;"
 
         # Create directories
         Write-Step 'Creating project structure'
-        foreach ($Dir in @('src', 'include', 'lib', 'bin', 'docs', 'scripts')) {
+        foreach ($Dir in @('src', 'docs', 'scripts')) {
             $DirPath = Join-Path $TargetDir $Dir
             New-Item -ItemType Directory -Path $DirPath -Force | Out-Null
             Track-Creation $DirPath 'directory'
@@ -403,7 +403,7 @@ int main(void) {
 "@
         Set-Content -Path $MainCPath -Value $MainCContent -Encoding UTF8
         Track-Creation $MainCPath 'file'
-        Write-Success 'Created: src/, include/, lib/, bin/, docs/, scripts/, src/main.c'
+        Write-Success 'Created: src/, docs/, scripts/, src/main.c'
 
         # VS Code integration (always create in init mode)
         Write-Step 'Configuring VS Code'
@@ -432,15 +432,6 @@ int main(void) {
         Track-Creation $SettingsPath 'file'
         Write-Success 'Created: .vscode/settings.json'
 
-        # Copy box.ps1 to project root
-        Write-Step 'Setting up box.ps1'
-        $SourceBox = Join-Path $BoxPath 'box.ps1'
-        $TargetBox = Join-Path $TargetDir 'box.ps1'
-        if (Test-Path $SourceBox) {
-            Copy-Item $SourceBox $TargetBox -Force
-            Write-Success 'Copied: box.ps1 to root'
-        }
-
         # Generate box.psd1 at root from template (if not exists)
         Write-Step 'Creating project config'
         $BoxPsd1Path = Join-Path $TargetDir 'box.psd1'
@@ -463,8 +454,8 @@ int main(void) {
         Write-Host "  📁 Location: $TargetDir" -ForegroundColor Cyan
         Write-Host "  🚀 Next steps:" -ForegroundColor Cyan
         Write-Host "    cd $SafeName" -ForegroundColor Gray
-        Write-Host "    # Edit box.psd1 to configure your project" -ForegroundColor Gray
-        Write-Host "    .\box.ps1 install" -ForegroundColor Gray
+        Write-Host "    1. Edit box.psd1 to configure your project" -ForegroundColor Gray
+        Write-Host "    2. Run: box install" -ForegroundColor Gray
         Write-Host ''
 
         # Change to project directory

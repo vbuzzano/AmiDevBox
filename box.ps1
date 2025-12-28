@@ -6,7 +6,7 @@
     Compiled from modular sources by build-box.ps1
 
 .NOTES
-    Compilation Date: 2025-12-28 03:19:19
+    Compilation Date: 2025-12-28 03:33:11
     Source Modules: 16
     Build System: Feature 001 - Compilation System
 #>
@@ -1910,11 +1910,11 @@ if (-not $SkipExecution) {
 # ============================================================================
 
 # Cache path (with override support)
-$script:CacheDir = if ($Config.CachePath) { 
-    if ([System.IO.Path]::IsPathRooted($Config.CachePath)) { $Config.CachePath } 
+$script:CacheDir = if ($Config.CachePath) {
+    if ([System.IO.Path]::IsPathRooted($Config.CachePath)) { $Config.CachePath }
     else { Join-Path $BaseDir $Config.CachePath }
-} else { 
-    Join-Path $BaseDir $Config.BoxPaths.Cache 
+} else {
+    Join-Path $BaseDir $Config.BoxPaths.Cache
 }
 $script:DownloadsDir = $CacheDir
 $script:TempDir = Join-Path $CacheDir "temp"
