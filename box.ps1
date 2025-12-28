@@ -6,7 +6,7 @@
     Compiled from modular sources by build-box.ps1
 
 .NOTES
-    Compilation Date: 2025-12-28 01:39:09
+    Compilation Date: 2025-12-28 03:10:41
     Source Modules: 16
     Build System: Feature 001 - Compilation System
 #>
@@ -1261,10 +1261,14 @@ function Generate-DotEnvFile {
     )
 
     # Project settings from merged config
-    # Support both flat keys (PROJECT_NAME) and nested (Project.Name)
+    # Support: flat (PROJECT_NAME), nested (Project.Name), or direct (Name)
     if ($Config.PROJECT_NAME) {
         $lines += "PROJECT_NAME=$($Config.PROJECT_NAME)"
         $programName = if ($Config.PROGRAM_NAME) { $Config.PROGRAM_NAME } else { $Config.PROJECT_NAME }
+        $lines += "PROGRAM_NAME=$programName"
+    } elseif ($Config.Name) {
+        $lines += "PROJECT_NAME=$($Config.Name)"
+        $programName = if ($Config.ProgramName) { $Config.ProgramName } else { $Config.Name }
         $lines += "PROGRAM_NAME=$programName"
     } elseif ($Config.Project -and $Config.Project.Name) {
         $lines += "PROJECT_NAME=$($Config.Project.Name)"
@@ -1273,24 +1277,31 @@ function Generate-DotEnvFile {
 
     if ($Config.DESCRIPTION) {
         $lines += "DESCRIPTION=$($Config.DESCRIPTION)"
+    } elseif ($Config.Description) {
+        $lines += "DESCRIPTION=$($Config.Description)"
     } elseif ($Config.Project -and $Config.Project.Description) {
         $lines += "DESCRIPTION=$($Config.Project.Description)"
     }
 
     if ($Config.VERSION) {
         $lines += "VERSION=$($Config.VERSION)"
+    } elseif ($Config.Version) {
+        $lines += "VERSION=$($Config.Version)"
     } elseif ($Config.Project -and $Config.Project.Version) {
         $lines += "VERSION=$($Config.Project.Version)"
     }
 
-    # CPU/FPU from nested config only
-    if ($Config.Project) {
-        if ($Config.Project.DefaultCPU) {
-            $lines += "DEFAULT_CPU=$($Config.Project.DefaultCPU)"
-        }
-        if ($Config.Project.DefaultFPU) {
-            $lines += "DEFAULT_FPU=$($Config.Project.DefaultFPU)"
-        }
+    # CPU/FPU from config (direct or nested)
+    if ($Config.DefaultCPU) {
+        $lines += "DEFAULT_CPU=$($Config.DefaultCPU)"
+    } elseif ($Config.Project -and $Config.Project.DefaultCPU) {
+        $lines += "DEFAULT_CPU=$($Config.Project.DefaultCPU)"
+    }
+
+    if ($Config.DefaultFPU) {
+        $lines += "DEFAULT_FPU=$($Config.DefaultFPU)"
+    } elseif ($Config.Project -and $Config.Project.DefaultFPU) {
+        $lines += "DEFAULT_FPU=$($Config.Project.DefaultFPU)"
     }
 
     $lines += ""
@@ -1843,8 +1854,8 @@ $script:SysConfig = Import-PowerShellDataFile $SysConfigFile
 $script:UserConfigFile = Join-Path $BaseDir $USER_CONFIG_FILENAME
 $script:UserConfigTemplate = Join-Path $BaseDir $SysConfig.UserConfigTemplate
 
-# Project config (created by devbox init with PROJECT_NAME, DESCRIPTION)
-$script:ProjectConfigFile = Join-Path $BoxDir 'project.psd1'
+# Project config (box.psd1 at root, created by devbox init)
+$script:ProjectConfigFile = Join-Path $BaseDir 'box.psd1'
 
 # Handle missing user config based on command
 $script:SkipExecution = $false
@@ -2518,17 +2529,17 @@ function Get-ConfigBoxVariables {
         Supports nested keys (converts to uppercase with _ prefix).
 
     .PARAMETER ConfigPath
-        Path to config.psd1 file. Defaults to .box/project.psd1 in current directory.
+        Path to config.psd1 file. Defaults to box.psd1 in current directory.
 
     .OUTPUTS
-        [hashtable] Configuration variables from .box/project.psd1
+        [hashtable] Configuration variables from box.psd1
 
     .EXAMPLE
         $config = Get-ConfigBoxVariables
         # Returns: @{ PROJECT_NAME = "MyProject"; VERSION = "0.1.0" }
     #>
     param(
-        [string]$ConfigPath = '.box/project.psd1'
+        [string]$ConfigPath = 'box.psd1'
     )
 
     $variables = @{}
@@ -3096,15 +3107,9 @@ function Invoke-BoxInit {
     $skipped = 0
 
     foreach ($template in $templates) {
-        # Determine output filename and path
+        # Determine output filename
         $outputName = $template.Name -replace '\.template', ''
-        
-        # box.config goes to .box/, other files to project root
-        if ($outputName -eq 'box.config') {
-            $outputPath = Join-Path '.box' $outputName
-        } else {
-            $outputPath = Join-Path (Get-Location) $outputName
-        }
+        $outputPath = Join-Path (Get-Location) $outputName
 
         # Skip if file already exists
         if (Test-Path $outputPath) {
