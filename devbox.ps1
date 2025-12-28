@@ -117,10 +117,11 @@ $Script:Config = @{
 
 function Write-Title {
     param([string]$Text)
+    $width = if ($Host.UI.RawUI.WindowSize.Width -gt 0) { $Host.UI.RawUI.WindowSize.Width - 1 } else { 80 }
     Write-Host "`n" -NoNewline
-    Write-Host '━' * 60 -ForegroundColor DarkMagenta
+    Write-Host ('━' * $width) -ForegroundColor DarkMagenta
     Write-Host "  $Text" -ForegroundColor White
-    Write-Host '━' * 60 -ForegroundColor DarkMagenta
+    Write-Host ('━' * $width) -ForegroundColor DarkMagenta
 }
 
 function Write-Step {
