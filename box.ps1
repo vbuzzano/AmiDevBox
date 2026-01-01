@@ -6,7 +6,7 @@
     Standalone box.ps1 with embedded modules
 
 .NOTES
-    Build Date: 2026-01-01 20:46:48
+    Build Date: 2026-01-02 00:07:37
     Version: 1.0.0
 #>
 
@@ -2736,6 +2736,189 @@ function Invoke-BoxInit {
     }
 }
 
+# ============================================================================
+# TAGGED FILE UPDATE SYSTEM (with Hooks)
+# ============================================================================
+
+function Update-TaggedFiles {
+    <#
+    .SYNOPSIS
+        Updates tagged values in project files using environment variables.
+
+    .DESCRIPTION
+        Scans project files for tagged values and replaces them with current
+        environment variable values. Supports hook system for box-specific
+        replacement syntaxes.
+
+        Core syntaxes:
+        - ~value[VAR_NAME]~ : Universal tag (works in any text file)
+
+        Box-specific syntaxes can be added via hooks in:
+        boxers/<BoxName>/core/hooks.ps1
+
+    .PARAMETER Path
+        Path to file or directory to process. Defaults to current directory.
+
+    .PARAMETER Recurse
+        Process files recursively in subdirectories.
+
+    .PARAMETER ReleaseMode
+        If true, strips tags from output (for release builds).
+        If false, preserves tags for future updates.
+
+    .PARAMETER Variables
+        Hashtable of variables to use for replacement. If not provided,
+        loads from .env file.
+
+    .EXAMPLE
+        Update-TaggedFiles -Path "README.md"
+        Updates tagged values in README.md
+
+    .EXAMPLE
+        Update-TaggedFiles -Path "." -Recurse
+        Updates all tagged files in project recursively
+    #>
+    param(
+        [string]$Path = ".",
+        [switch]$Recurse,
+        [switch]$ReleaseMode,
+        [hashtable]$Variables = $null
+    )
+
+    # Load variables if not provided
+    if (-not $Variables) {
+        $Variables = Get-TemplateVariables
+        if ($Variables.Count -eq 0) {
+            Write-Verbose "No variables found in .env"
+            return
+        }
+    }
+
+    # Find files to process
+    $files = @()
+    if (Test-Path $Path -PathType Container) {
+        $files = Get-ChildItem -Path $Path -File -Recurse:$Recurse
+    } elseif (Test-Path $Path -PathType Leaf) {
+        $files = @(Get-Item $Path)
+    } else {
+        Write-Warn "Path not found: $Path"
+        return
+    }
+
+    if ($files.Count -eq 0) {
+        Write-Verbose "No files to process"
+        return
+    }
+
+    $processedCount = 0
+
+    foreach ($file in $files) {
+        # Skip binary files
+        if (-not (Test-TextFile $file.FullName)) {
+            continue
+        }
+
+        $text = Get-Content $file.FullName -Raw -Encoding UTF8
+        $originalText = $text
+
+        # Hook: Before replacement (box-specific syntaxes)
+        if (Get-Command "Hook-BeforeTemplateReplace" -ErrorAction SilentlyContinue) {
+            $text = Hook-BeforeTemplateReplace $text $Variables $ReleaseMode
+        }
+
+        # Core syntax: ~value[VAR_NAME]~
+        $text = Apply-TildeSyntax $text $Variables $ReleaseMode
+
+        # Hook: After replacement (box-specific post-processing)
+        if (Get-Command "Hook-AfterTemplateReplace" -ErrorAction SilentlyContinue) {
+            $text = Hook-AfterTemplateReplace $text $Variables $ReleaseMode
+        }
+
+        # Save if changed
+        if ($text -ne $originalText) {
+            Set-Content -Path $file.FullName -Value $text -Encoding UTF8 -NoNewline
+            Write-Verbose "Updated: $($file.Name)"
+            $processedCount++
+        }
+    }
+
+    if ($processedCount -gt 0) {
+        Write-Verbose "Updated $processedCount file(s)"
+    }
+}
+
+function Apply-TildeSyntax {
+    <#
+    .SYNOPSIS
+        Applies ~value[VAR]~ replacement syntax.
+
+    .DESCRIPTION
+        Replaces tagged values in format ~oldvalue[VAR_NAME]~
+
+        In-place mode: ~oldvalue[VAR]~ → ~newvalue[VAR]~ (preserves tags)
+        Release mode:  ~oldvalue[VAR]~ → newvalue (strips tags)
+    #>
+    param(
+        [string]$Text,
+        [hashtable]$Variables,
+        [bool]$ReleaseMode
+    )
+
+    $Text = [regex]::Replace($Text, '~([^\[~]*?)(\[[^\]]+\]~)', {
+        param($match)
+
+        $taggedVar = $match.Groups[2].Value  # [VAR_NAME]~
+        $varName = $taggedVar -replace '[\[\]~]', ''
+
+        # Find matching variable (case-insensitive)
+        $matchedKey = $Variables.Keys | Where-Object { $_ -ieq $varName } | Select-Object -First 1
+
+        if ($matchedKey) {
+            $newValue = $Variables[$matchedKey]
+
+            if ($ReleaseMode) {
+                # Release: strip tags completely
+                return $newValue
+            } else {
+                # In-place: preserve tags, update value
+                return "~$newValue$taggedVar"
+            }
+        }
+
+        return $match.Value
+    })
+
+    return $Text
+}
+
+function Test-TextFile {
+    <#
+    .SYNOPSIS
+        Tests if a file is a text file (not binary).
+    #>
+    param([string]$Path)
+
+    try {
+        $stream = [System.IO.File]::OpenRead($Path)
+        $buffer = New-Object byte[] 512
+        $read = $stream.Read($buffer, 0, 512)
+        $stream.Close()
+
+        $sample = [System.Text.Encoding]::UTF8.GetString($buffer, 0, $read)
+
+        # If contains null bytes or control chars (except CR/LF/TAB), it's binary
+        if ($sample -match "[\x00-\x08\x0B\x0E-\x1F]" -and $sample -notmatch "\r|\n|\t") {
+            return $false
+        }
+
+        return $true
+    }
+    catch {
+        return $false
+    }
+}
+
+
 # END core/templates.ps1
 # BEGIN core/ui.ps1
 # ============================================================================
@@ -3050,73 +3233,6 @@ function Invoke-Box-Clean {
 }
 
 # END modules/box/clean.ps1
-# BEGIN modules/box/env.ps1
-# ============================================================================
-# Box Env Module
-# ============================================================================
-#
-# Handles box env command - environment variable management
-
-function Invoke-Box-Env {
-    <#
-    .SYNOPSIS
-    Manages environment variables for the project.
-
-    .PARAMETER Sub
-    Subcommand: list, update
-
-    .EXAMPLE
-    box env list
-    box env update
-    #>
-    param(
-        [string]$Sub = "list"
-    )
-
-    switch ($Sub) {
-        "list" {
-            Show-EnvList
-        }
-        "update" {
-            Generate-AllEnvFiles
-            Write-Success ".env updated"
-        }
-        default {
-            Write-Err "Unknown env subcommand: $Sub"
-            Write-Info "Use: list, update"
-        }
-    }
-}
-
-function Show-EnvList {
-    <#
-    .SYNOPSIS
-    Displays all environment variables configured for the project.
-    #>
-    Write-Host ""
-    Write-Host "Environment Variables:" -ForegroundColor Cyan
-    Write-Host ""
-
-    $state = Load-State
-    if ($state.packages) {
-        foreach ($pkgName in $state.packages.Keys) {
-            $pkg = $state.packages[$pkgName]
-            if ($pkg.envs) {
-                Write-Host "  $pkgName" -ForegroundColor White
-                foreach ($envName in $pkg.envs.Keys) {
-                    $envValue = $pkg.envs[$envName]
-                    Write-Host ("    {0,-20} = {1}" -f $envName, $envValue) -ForegroundColor Gray
-                }
-            }
-        }
-    } else {
-        Write-Info "No packages installed yet"
-    }
-
-    Write-Host ""
-}
-
-# END modules/box/env.ps1
 # BEGIN modules/box/install.ps1
 # ============================================================================
 # Box Install Module
@@ -3173,6 +3289,77 @@ function Invoke-Box-Install {
 }
 
 # END modules/box/install.ps1
+# BEGIN modules/box/load.ps1
+# ============================================================================
+# Box Load Module
+# ============================================================================
+#
+# Handles box load command - complete environment setup in one command
+
+function Invoke-Box-Load {
+    <#
+    .SYNOPSIS
+    Loads the complete Boxing environment in one command.
+
+    .DESCRIPTION
+    This command does everything needed to start working:
+    1. Updates .env file from packages
+    2. Updates VS Code settings
+    3. Loads .env variables into current PowerShell session
+    4. Adds .box/ and scripts/ to PATH
+
+    .EXAMPLE
+    box load
+    #>
+    param()
+
+    Write-Host ""
+    Write-Host "Loading Boxing environment..." -ForegroundColor Cyan
+    Write-Host ""
+
+    # 1. Generate .env file
+    Write-Step "Updating .env file"
+    Generate-AllEnvFiles
+    Write-Success ".env updated"
+
+    # 2. Update VS Code settings
+    Write-Step "Updating VS Code settings"
+    Update-VSCodeEnv
+    Write-Success "VS Code env updated"
+
+    # 3. Load .env into current session
+    Write-Step "Loading environment into session"
+    $envFile = Join-Path $BaseDir ".env"
+
+    if (-not (Test-Path $envFile)) {
+        Write-Err ".env file not found after update"
+        return
+    }
+
+    $loadedCount = 0
+    Get-Content $envFile | ForEach-Object {
+        if ($_ -match '^([^#=]+)=(.*)$') {
+            $key = $matches[1].Trim()
+            $value = $matches[2].Trim()
+            Set-Item "env:$key" $value
+            $loadedCount++
+        }
+    }
+    Write-Success "Loaded $loadedCount variables into session"
+
+    # 4. Add .box and scripts to PATH
+    Write-Step "Updating PATH"
+    $boxPath = Join-Path $BaseDir ".box"
+    $scriptsPath = Join-Path $BaseDir "scripts"
+    $env:PATH = "$boxPath;$scriptsPath;$env:PATH"
+    Write-Success "Added .box/ and scripts/ to PATH"
+
+    Write-Host ""
+    Write-Host "✓ Boxing environment ready!" -ForegroundColor Green
+    Write-Host ""
+}
+
+# END modules/box/load.ps1
 # BEGIN modules/box/status.ps1
 # ============================================================================
 # Box Status Module
