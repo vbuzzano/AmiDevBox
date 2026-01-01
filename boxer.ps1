@@ -1,19 +1,16 @@
 <#
 .SYNOPSIS
-    Box - Project Workspace Manager
+    Boxer - Global Boxing Manager
 
 .DESCRIPTION
-    Standalone box.ps1 with embedded modules
+    Standalone boxer.ps1 with embedded modules
 
 .NOTES
-    Build Date: 2026-01-02 00:43:13
+    Build Date: 2025-12-31 22:11:26
     Version: 1.0.0
 #>
 
 param(
-    [Parameter(Position=0)]
-    [string]$Command,
-
     [Parameter(ValueFromRemainingArguments=$true)]
     [string[]]$Arguments
 )
@@ -21,39 +18,10 @@ param(
 $ErrorActionPreference = 'Stop'
 
 # ============================================================================
-# Bootstrap - Find .box directory
+# EMBEDDED boxing.ps1 (bootstrapper)
 # ============================================================================
 
-$BaseDir = Get-Location
-$BoxDir = $null
-
-while ($true) {
-    $testPath = Join-Path $BaseDir '.box'
-    if (Test-Path $testPath) {
-        $BoxDir = $testPath
-        break
-    }
-    $parent = Split-Path $BaseDir -Parent
-    if (-not $parent -or $parent -eq $BaseDir) {
-        Write-Host "ERROR: No .box directory found" -ForegroundColor Red
-        Write-Host "Run this from a box project directory" -ForegroundColor Gray
-        exit 1
-    }
-    $BaseDir = $parent
-}
-
-# Set global paths
-$script:BaseDir = $BaseDir
-$script:BoxDir = $BoxDir
-$script:VendorDir = Join-Path $BaseDir "vendor"
-$script:TempDir = Join-Path $BaseDir "temp"
-$script:StateFile = Join-Path $BoxDir "state.json"
-
-# ============================================================================
-# EMBEDDED boxing.ps1 (bootstrapper functions)
-# ============================================================================
-
-# BEGIN boxing.ps1 (functions only)
+# BEGIN boxing.ps1
 # Boxing - Common bootstrapper for boxer and box
 #
 # This script serves as the shared foundation for both boxer.ps1 (global manager)
@@ -2736,189 +2704,6 @@ function Invoke-BoxInit {
     }
 }
 
-# ============================================================================
-# TAGGED FILE UPDATE SYSTEM (with Hooks)
-# ============================================================================
-
-function Update-TaggedFiles {
-    <#
-    .SYNOPSIS
-        Updates tagged values in project files using environment variables.
-
-    .DESCRIPTION
-        Scans project files for tagged values and replaces them with current
-        environment variable values. Supports hook system for box-specific
-        replacement syntaxes.
-
-        Core syntaxes:
-        - ~value[VAR_NAME]~ : Universal tag (works in any text file)
-
-        Box-specific syntaxes can be added via hooks in:
-        boxers/<BoxName>/core/hooks.ps1
-
-    .PARAMETER Path
-        Path to file or directory to process. Defaults to current directory.
-
-    .PARAMETER Recurse
-        Process files recursively in subdirectories.
-
-    .PARAMETER ReleaseMode
-        If true, strips tags from output (for release builds).
-        If false, preserves tags for future updates.
-
-    .PARAMETER Variables
-        Hashtable of variables to use for replacement. If not provided,
-        loads from .env file.
-
-    .EXAMPLE
-        Update-TaggedFiles -Path "README.md"
-        Updates tagged values in README.md
-
-    .EXAMPLE
-        Update-TaggedFiles -Path "." -Recurse
-        Updates all tagged files in project recursively
-    #>
-    param(
-        [string]$Path = ".",
-        [switch]$Recurse,
-        [switch]$ReleaseMode,
-        [hashtable]$Variables = $null
-    )
-
-    # Load variables if not provided
-    if (-not $Variables) {
-        $Variables = Get-TemplateVariables
-        if ($Variables.Count -eq 0) {
-            Write-Verbose "No variables found in .env"
-            return
-        }
-    }
-
-    # Find files to process
-    $files = @()
-    if (Test-Path $Path -PathType Container) {
-        $files = Get-ChildItem -Path $Path -File -Recurse:$Recurse
-    } elseif (Test-Path $Path -PathType Leaf) {
-        $files = @(Get-Item $Path)
-    } else {
-        Write-Warn "Path not found: $Path"
-        return
-    }
-
-    if ($files.Count -eq 0) {
-        Write-Verbose "No files to process"
-        return
-    }
-
-    $processedCount = 0
-
-    foreach ($file in $files) {
-        # Skip binary files
-        if (-not (Test-TextFile $file.FullName)) {
-            continue
-        }
-
-        $text = Get-Content $file.FullName -Raw -Encoding UTF8
-        $originalText = $text
-
-        # Hook: Before replacement (box-specific syntaxes)
-        if (Get-Command "Hook-BeforeTemplateReplace" -ErrorAction SilentlyContinue) {
-            $text = Hook-BeforeTemplateReplace $text $Variables $ReleaseMode
-        }
-
-        # Core syntax: ~value[VAR_NAME]~
-        $text = Apply-TildeSyntax $text $Variables $ReleaseMode
-
-        # Hook: After replacement (box-specific post-processing)
-        if (Get-Command "Hook-AfterTemplateReplace" -ErrorAction SilentlyContinue) {
-            $text = Hook-AfterTemplateReplace $text $Variables $ReleaseMode
-        }
-
-        # Save if changed
-        if ($text -ne $originalText) {
-            Set-Content -Path $file.FullName -Value $text -Encoding UTF8 -NoNewline
-            Write-Verbose "Updated: $($file.Name)"
-            $processedCount++
-        }
-    }
-
-    if ($processedCount -gt 0) {
-        Write-Verbose "Updated $processedCount file(s)"
-    }
-}
-
-function Apply-TildeSyntax {
-    <#
-    .SYNOPSIS
-        Applies ~value[VAR]~ replacement syntax.
-
-    .DESCRIPTION
-        Replaces tagged values in format ~oldvalue[VAR_NAME]~
-
-        In-place mode: ~oldvalue[VAR]~ → ~newvalue[VAR]~ (preserves tags)
-        Release mode:  ~oldvalue[VAR]~ → newvalue (strips tags)
-    #>
-    param(
-        [string]$Text,
-        [hashtable]$Variables,
-        [bool]$ReleaseMode
-    )
-
-    $Text = [regex]::Replace($Text, '~([^\[~]*?)(\[[^\]]+\]~)', {
-        param($match)
-
-        $taggedVar = $match.Groups[2].Value  # [VAR_NAME]~
-        $varName = $taggedVar -replace '[\[\]~]', ''
-
-        # Find matching variable (case-insensitive)
-        $matchedKey = $Variables.Keys | Where-Object { $_ -ieq $varName } | Select-Object -First 1
-
-        if ($matchedKey) {
-            $newValue = $Variables[$matchedKey]
-
-            if ($ReleaseMode) {
-                # Release: strip tags completely
-                return $newValue
-            } else {
-                # In-place: preserve tags, update value
-                return "~$newValue$taggedVar"
-            }
-        }
-
-        return $match.Value
-    })
-
-    return $Text
-}
-
-function Test-TextFile {
-    <#
-    .SYNOPSIS
-        Tests if a file is a text file (not binary).
-    #>
-    param([string]$Path)
-
-    try {
-        $stream = [System.IO.File]::OpenRead($Path)
-        $buffer = New-Object byte[] 512
-        $read = $stream.Read($buffer, 0, 512)
-        $stream.Close()
-
-        $sample = [System.Text.Encoding]::UTF8.GetString($buffer, 0, $read)
-
-        # If contains null bytes or control chars (except CR/LF/TAB), it's binary
-        if ($sample -match "[\x00-\x08\x0B\x0E-\x1F]" -and $sample -notmatch "\r|\n|\t") {
-            return $false
-        }
-
-        return $true
-    }
-    catch {
-        return $false
-    }
-}
-
-
 # END core/templates.ps1
 # BEGIN core/ui.ps1
 # ============================================================================
@@ -3193,283 +2978,128 @@ function Invoke-ConfigWizard {
 # END core/wizard.ps1
 
 # ============================================================================
-# EMBEDDED modules/box/*.ps1 (box commands)
+# EMBEDDED modules/boxer/*.ps1 (boxer commands)
 # ============================================================================
 
-# BEGIN modules/box/clean.ps1
+# BEGIN modules/boxer/init.ps1
 # ============================================================================
-# Box Clean Module
-# ============================================================================
-#
-# Handles box clean command - cleaning build artifacts
-
-function Invoke-Box-Clean {
-    <#
-    .SYNOPSIS
-    Cleans build artifacts from the project.
-
-    .EXAMPLE
-    box clean
-    #>
-
-    Write-Title "Cleaning Build Artifacts"
-
-    # Clean common build directories
-    $cleanDirs = @('build', 'dist', 'out', 'bin', 'obj')
-
-    foreach ($dir in $cleanDirs) {
-        $dirPath = Join-Path $BaseDir $dir
-        if (Test-Path $dirPath) {
-            Remove-Item $dirPath -Recurse -Force -ErrorAction SilentlyContinue
-            Write-Success "Removed: $dir/"
-        }
-    }
-
-    # Clean temp files
-    Get-ChildItem -Path $BaseDir -Filter "*.tmp" -Recurse | Remove-Item -Force -ErrorAction SilentlyContinue
-    Get-ChildItem -Path $BaseDir -Filter "*.log" -Recurse | Remove-Item -Force -ErrorAction SilentlyContinue
-
-    Write-Success "Clean complete"
-}
-
-# END modules/box/clean.ps1
-# BEGIN modules/box/install.ps1
-# ============================================================================
-# Box Install Module
+# Boxer Init Module
 # ============================================================================
 #
-# Handles box install command - installing packages in a project
+# Handles boxer init command - creating new Box projects
 
-function Invoke-Box-Install {
+function Invoke-Boxer-Init {
     <#
     .SYNOPSIS
-    Installs all configured packages for the project.
+    Creates a new Box project with full structure.
+
+    .PARAMETER ProjectName
+    Name of the project to create
+
+    .PARAMETER Description
+    Optional project description
 
     .EXAMPLE
-    box install
+    boxer init MyProject "My awesome project"
     #>
+    param(
+        [Parameter(Mandatory=$true)]
+        [string]$ProjectName,
+        [string]$Description = ""
+    )
 
-    Write-Title "$($Config.Project.Name) Setup"
+    # Sanitize project name
+    $SafeName = $ProjectName -replace '[^\w\-]', '-'
+    $TargetDir = Join-Path (Get-Location) $SafeName
 
-    # Run config wizard if needed
-    if ($NeedsWizard) {
-        if (-not (Invoke-ConfigWizard)) {
-            return
-        }
-    }
-
-    # Create directories
-    Create-Directories
-
-    # Ensure 7-Zip is available
-    Ensure-SevenZip
-
-    # Install all packages
-    foreach ($pkg in $AllPackages) {
-        try {
-            Process-Package $pkg
-        } catch {
-            Write-Err "Failed to process $($pkg.Name): $_"
-            Write-Info "Continuing with remaining packages..."
-        }
-    }
-
-    # Cleanup
-    Cleanup-Temp
-
-    # Generate Makefile if box-specific
-    if (Get-Command Setup-Makefile -ErrorAction SilentlyContinue) {
-        Setup-Makefile
-    }
-
-    # Generate env files
-    Generate-AllEnvFiles
-
-    Show-InstallComplete
-}
-
-# END modules/box/install.ps1
-# BEGIN modules/box/load.ps1
-# ============================================================================
-# Box Load Module
-# ============================================================================
-#
-# Handles box load command - complete environment setup in one command
-
-function Invoke-Box-Load {
-    <#
-    .SYNOPSIS
-    Loads the complete Boxing environment in one command.
-
-    .DESCRIPTION
-    This command does everything needed to start working:
-    1. Updates .env file from packages
-    2. Updates VS Code settings
-    3. Loads .env variables into current PowerShell session
-    4. Adds .box/ and scripts/ to PATH
-
-    .EXAMPLE
-    box load
-    #>
-    param()
-
-    Write-Host ""
-    Write-Host "Loading Boxing environment..." -ForegroundColor Cyan
-    Write-Host ""
-
-    # 1. Generate .env file
-    Write-Step "Updating .env file"
-    Generate-AllEnvFiles
-    Write-Success ".env updated"
-
-    # 2. Update VS Code settings
-    Write-Step "Updating VS Code settings"
-    Update-VSCodeEnv
-    Write-Success "VS Code env updated"
-
-    # 3. Load .env into current session
-    Write-Step "Loading environment into session"
-    $envFile = Join-Path $BaseDir ".env"
-
-    if (-not (Test-Path $envFile)) {
-        Write-Err ".env file not found after update"
+    # Check if directory exists
+    if (Test-Path $TargetDir) {
+        Write-Err "Directory '$SafeName' already exists"
         return
     }
 
-    $loadedCount = 0
-    Get-Content $envFile | ForEach-Object {
-        if ($_ -match '^([^#=]+)=(.*)$') {
-            $key = $matches[1].Trim()
-            $value = $matches[2].Trim()
-            Set-Item "env:$key" $value
-            $loadedCount++
+    Write-Step "Creating project: $ProjectName"
+
+    try {
+        # Create project directory
+        New-Item -ItemType Directory -Path $TargetDir -Force | Out-Null
+
+        # Create .box directory
+        $BoxPath = Join-Path $TargetDir ".box"
+        New-Item -ItemType Directory -Path $BoxPath -Force | Out-Null
+
+        # Copy box.ps1 and boxing.ps1
+        $LocalBoxPath = Join-Path (Split-Path -Parent $PSScriptRoot) "boxing.ps1"
+        if (Test-Path $LocalBoxPath) {
+            Copy-Item $LocalBoxPath (Join-Path $BoxPath "boxing.ps1") -Force
+            Write-Success "Copied: boxing.ps1"
+        }
+
+        # Copy config.psd1
+        $LocalConfigPath = Join-Path (Split-Path -Parent $PSScriptRoot) "config.psd1"
+        if (Test-Path $LocalConfigPath) {
+            Copy-Item $LocalConfigPath (Join-Path $BoxPath "config.psd1") -Force
+            Write-Success "Copied: config.psd1"
+        }
+
+        # Create basic structure
+        @('src', 'docs', 'scripts', 'vendor') | ForEach-Object {
+            New-Item -ItemType Directory -Path (Join-Path $TargetDir $_) -Force | Out-Null
+        }
+
+        Write-Success "Project created: $SafeName"
+        Write-Info "Next steps:"
+        Write-Info "  cd $SafeName"
+        Write-Info "  box install"
+
+    } catch {
+        Write-Err "Project creation failed: $_"
+        if (Test-Path $TargetDir) {
+            Remove-Item $TargetDir -Recurse -Force -ErrorAction SilentlyContinue
         }
     }
-    Write-Success "Loaded $loadedCount variables into session"
-
-    # 4. Add .box and scripts to PATH
-    Write-Step "Updating PATH"
-    $boxPath = Join-Path $BaseDir ".box"
-    $scriptsPath = Join-Path $BaseDir "scripts"
-    $env:PATH = "$boxPath;$scriptsPath;$env:PATH"
-    Write-Success "Added .box/ and scripts/ to PATH"
-
-    Write-Host ""
-    Write-Host "✓ Boxing environment ready!" -ForegroundColor Green
-    Write-Host ""
 }
 
-# END modules/box/load.ps1
-# BEGIN modules/box/status.ps1
+# END modules/boxer/init.ps1
+# BEGIN modules/boxer/list.ps1
 # ============================================================================
-# Box Status Module
+# Boxer List Module
 # ============================================================================
 #
-# Handles box status command - showing project status
+# Handles boxer list command - listing available boxes
 
-function Invoke-Box-Status {
+function Invoke-Boxer-List {
     <#
     .SYNOPSIS
-    Displays project status and configuration.
+    Lists all available Box types.
 
     .EXAMPLE
-    box status
+    boxer list
     #>
-
     Write-Host ""
-    Write-Host "Project Status" -ForegroundColor Cyan
-    Write-Host ("=" * 60) -ForegroundColor DarkGray
+    Write-Host "Available Boxes:" -ForegroundColor Cyan
     Write-Host ""
 
-    # Project info
-    if ($Config.Project) {
-        Write-Host "Project:" -ForegroundColor White
-        Write-Host ("  Name:        {0}" -f $Config.Project.Name) -ForegroundColor Gray
-        Write-Host ("  Description: {0}" -f $Config.Project.Description) -ForegroundColor Gray
-        Write-Host ("  Version:     {0}" -f $Config.Project.Version) -ForegroundColor Gray
-        Write-Host ""
-    }
+    $boxersPath = Join-Path (Split-Path -Parent $PSScriptRoot) "boxers"
 
-    # Packages status
-    $state = Load-State
-    $installedCount = 0
-    $manualCount = 0
-
-    if ($state.packages) {
-        foreach ($pkgName in $state.packages.Keys) {
-            $pkg = $state.packages[$pkgName]
-            if ($pkg.installed) {
-                $installedCount++
+    if (Test-Path $boxersPath) {
+        Get-ChildItem -Path $boxersPath -Directory | ForEach-Object {
+            $metadataPath = Join-Path $_.FullName "metadata.psd1"
+            if (Test-Path $metadataPath) {
+                $metadata = Import-PowerShellDataFile $metadataPath
+                Write-Host ("  {0,-20} - {1}" -f $_.Name, $metadata.Description) -ForegroundColor White
             } else {
-                $manualCount++
+                Write-Host ("  {0,-20} - {1}" -f $_.Name, "(No description)") -ForegroundColor Gray
             }
         }
-    }
-
-    Write-Host "Packages:" -ForegroundColor White
-    Write-Host ("  Installed:   {0}" -f $installedCount) -ForegroundColor Green
-    Write-Host ("  Manual:      {0}" -f $manualCount) -ForegroundColor Yellow
-    Write-Host ("  Total:       {0}" -f ($installedCount + $manualCount)) -ForegroundColor Gray
-    Write-Host ""
-
-    # Directories
-    Write-Host "Directories:" -ForegroundColor White
-    Write-Host ("  Base:        {0}" -f $BaseDir) -ForegroundColor Gray
-    Write-Host ("  Vendor:      {0}" -f $VendorDir) -ForegroundColor Gray
-    Write-Host ("  Temp:        {0}" -f $TempDir) -ForegroundColor Gray
-    Write-Host ""
-}
-
-# END modules/box/status.ps1
-# BEGIN modules/box/uninstall.ps1
-# ============================================================================
-# Box Uninstall Module
-# ============================================================================
-#
-# Handles box uninstall command - removing installed packages
-
-function Invoke-Box-Uninstall {
-    <#
-    .SYNOPSIS
-    Uninstalls all packages from the project.
-
-    .EXAMPLE
-    box uninstall
-    #>
-
-    Write-Title "Uninstall Environment"
-
-    # Check for custom uninstall script
-    $uninstallScript = Join-Path $BoxDir "uninstall.ps1"
-    if (Test-Path $uninstallScript) {
-        & $uninstallScript
     } else {
-        # Default uninstall: remove all package files
-        $state = Load-State
-        if ($state.packages) {
-            foreach ($pkgName in $state.packages.Keys) {
-                Write-Step "Removing $pkgName"
-                Remove-Package -Name $pkgName
-            }
-        }
-
-        # Remove vendor directory
-        if (Test-Path $VendorDir) {
-            Remove-Item $VendorDir -Recurse -Force -ErrorAction SilentlyContinue
-            Write-Success "Removed vendor directory"
-        }
-
-        # Remove state file
-        if (Test-Path $StateFile) {
-            Remove-Item $StateFile -Force -ErrorAction SilentlyContinue
-            Write-Success "Removed state file"
-        }
-
-        Write-Success "Uninstall complete"
+        Write-Warn "No boxes found in: $boxersPath"
     }
+
+    Write-Host ""
 }
 
-# END modules/box/uninstall.ps1
+# END modules/boxer/list.ps1
 
 # ============================================================================
 # EMBEDDED modules/shared/pkg/*.ps1 (pkg module)
@@ -3841,23 +3471,8 @@ function Remove-Package {
 # END modules/shared/pkg/uninstall.ps1
 
 # ============================================================================
-# MAIN - Command dispatcher
+# MAIN - Invoke bootstrapper
 # ============================================================================
 
-if (-not $Command) {
-    $Command = "install"
-}
-
-switch ($Command) {
-    "install" { Invoke-Box-Install }
-    "uninstall" { Invoke-Box-Uninstall }
-    "env" { Invoke-Box-Env -Sub ($Arguments[0]) }
-    "clean" { Invoke-Box-Clean }
-    "status" { Invoke-Box-Status }
-    default {
-        Write-Host "Unknown command: $Command" -ForegroundColor Red
-        Write-Host "Available: install, uninstall, env, clean, status" -ForegroundColor Gray
-        exit 1
-    }
-}
+Initialize-Boxing -Arguments $Arguments
 
