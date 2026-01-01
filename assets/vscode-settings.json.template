@@ -1,0 +1,14 @@
+{
+  "terminal.integrated.profiles.windows": {
+    "Boxing PowerShell": {
+      "source": "PowerShell",
+      "args": ["-NoExit", "-Command", ". ./.box/.env.ps1"]
+    }
+  },
+  "terminal.integrated.defaultProfile.windows": "Boxing PowerShell",
+  "powershell.codeFormatting.preset": "OTBS",
+  "[powershell]": {
+    "editor.defaultFormatter": "ms-vscode.powershell",
+    "editor.formatOnSave": true
+  }
+}

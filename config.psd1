@@ -1,56 +1,21 @@
-# ============================================================================
-# AmigaDevBox - System Configuration (DO NOT MODIFY)
-# ============================================================================
-# This file contains system settings that should not be modified by users.
-# For user customization, edit box.config.psd1 in the project root.
-# ============================================================================
-
 @{
-    # ========================================================================
-    # Build Directories (created for Makefile)
-    # ========================================================================
+    Name = "AmiDevBox"
+    Type = "dev"
+    Description = "Amiga development environment with VBCC, NDK, and tools"
+    Version = "1.0.0"
+
+    # Build directories
     Directories = @(
         "build/asm"
         "build/obj"
         "dist"
+        "src"
+        "include"
+        "docs"
+        "scripts"
     )
 
-    # ========================================================================
-    # Makefile Template
-    # ========================================================================
-    MakefileTemplate = ".box/tpl/Makefile.template"
-
-    # ========================================================================
-    # Box Internal Paths
-    # ========================================================================
-    BoxPaths = @{
-        Cache        = ".box/cache"      # Downloads and temp files
-        Tools        = ".box/tools"      # Box tools (7z, acp, gdb)
-    }
-
-    # ========================================================================
-    # Project Structure Paths (used in Makefile.env)
-    # ========================================================================
-    Paths = @{
-        SrcDir       = "src"
-        IncludeDir   = "include"
-        BuildDir     = "build"
-        AsmDir       = "build/asm"
-        ObjDir       = "build/obj"
-        DistDir      = "dist"
-        VendorDir    = "vendor"
-
-        # Tools (in .box/tools)
-        ACP          = "./.box/tools/acp.exe"
-        GDB          = "./.box/tools/bgdbserver"
-    }
-
-    # ========================================================================
-    # Core Packages (required dependencies)
-    # ========================================================================
-    # Format: TYPE:pattern:destination[:ENV_VAR]
-    # Types: SDK, SRC, INC, TOOL, LIB, FILE
-    # ========================================================================
+    # Packages to install
     Packages = @(
         @{
             Name        = "VBCC Compiler"
@@ -93,8 +58,8 @@
             Url         = "https://aminet.net/util/arc/lhant.lha"
             File        = "lhant.lha"
             Description = "Windows version of LHA"
-            Archive     = "lha"           # zip, lha, 7z, tar.gz
-            Mode        = "auto"          # auto = install without asking
+            Archive     = "lha"
+            Mode        = "auto"
             DetectEnv   = "LHATOOL"
             Extract     = @(
                 "TOOL:lhant.exe:vendor/tools/lhant.exe:LHATOOL"
@@ -131,4 +96,22 @@
             )
         }
     )
+
+    # Environment variables
+    Envs = @{
+        SRC_DIR = "src"
+        INCLUDE_DIR = "include"
+        BUILD_DIR = "build"
+        ASM_DIR = "build/asm"
+        OBJ_DIR = "build/obj"
+        DIST_DIR = "dist"
+        VENDOR_DIR = "vendor"
+    }
+
+    # Workspace initialization
+    InitWorkspace = $true
+
+    # Makefile template
+    MakefileTemplate = "assets/Makefile.template"
 }
+

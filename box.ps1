@@ -1,146 +1,269 @@
 <#
 .SYNOPSIS
-    DevBox - Unified Development Workspace Manager
+    Box - Project Workspace Manager
 
 .DESCRIPTION
-    Compiled from modular sources by build-box.ps1
+    Standalone box.ps1 with embedded modules
 
 .NOTES
-    Compilation Date: 2025-12-28 05:42:32
-    Source Modules: 16
-    Build System: Feature 001 - Compilation System
-#>
-
-<#
-.SYNOPSIS
-    ApolloDevBox Development Environment Setup
-
-.DESCRIPTION
-    Manages the development environment for AmigaOS cross-compilation.
-
-.PARAMETER Command
-    The command to execute: install, uninstall, env, pkg, help
-
-.EXAMPLE
-    .\box.ps1                    # Install (default)
-    .\box.ps1 install            # Install all
-    .\box.ps1 uninstall          # Uninstall environment
-    .\box.ps1 env list           # List environment variables
-    .\box.ps1 env reset          # Regenerate env files
-    .\box.ps1 env add KEY=VALUE  # Add environment variable
-    .\box.ps1 pkg list           # List packages
-    .\box.ps1 pkg update         # Update packages
-    .\box.ps1 help               # Show help
-
-.NOTES
-    Author: Vincent Buzzano (ReddoC)
-    Date: December 2025
+    Build Date: 2026-01-01 20:46:48
+    Version: 1.0.0
 #>
 
 param(
-    [Parameter(Position = 0)]
-    [ValidateSet("init", "install", "uninstall", "env", "pkg", "template", "help", "")]
-    [string]$Command = "help",
+    [Parameter(Position=0)]
+    [string]$Command,
 
-    [Parameter(Position = 1)]
-    [string]$SubCommand = "",
-
-    [Parameter(Position = 2, ValueFromRemainingArguments = $true)]
-    [string[]]$Args,
-
-    [switch]$Help,
-    [switch]$Version
+    [Parameter(ValueFromRemainingArguments=$true)]
+    [string[]]$Arguments
 )
 
-$ErrorActionPreference = "Stop"
+$ErrorActionPreference = 'Stop'
 
-# Version from devbox.ps1 (injected during compilation)
-$Script:BoxVersion = if ($Script:DevBoxVersion) { $Script:DevBoxVersion } else { '0.1.20'}
+# ============================================================================
+# Bootstrap - Find .box directory
+# ============================================================================
 
-if ($Version) {
-    Write-Host "Box v$Script:BoxVersion" -ForegroundColor Cyan
-    exit 0
+$BaseDir = Get-Location
+$BoxDir = $null
+
+while ($true) {
+    $testPath = Join-Path $BaseDir '.box'
+    if (Test-Path $testPath) {
+        $BoxDir = $testPath
+        break
+    }
+    $parent = Split-Path $BaseDir -Parent
+    if (-not $parent -or $parent -eq $BaseDir) {
+        Write-Host "ERROR: No .box directory found" -ForegroundColor Red
+        Write-Host "Run this from a box project directory" -ForegroundColor Gray
+        exit 1
+    }
+    $BaseDir = $parent
 }
 
+# Set global paths
+$script:BaseDir = $BaseDir
+$script:BoxDir = $BoxDir
+$script:VendorDir = Join-Path $BaseDir "vendor"
+$script:TempDir = Join-Path $BaseDir "temp"
+$script:StateFile = Join-Path $BoxDir "state.json"
+
 # ============================================================================
-# Quick Help (before loading config)
+# EMBEDDED boxing.ps1 (bootstrapper functions)
 # ============================================================================
 
-function Show-QuickHelp {
-    Write-Host ""
-    Write-Host "Usage: box [command] [subcommand]" -ForegroundColor Cyan
-    Write-Host ""
-    Write-Host "Commands:" -ForegroundColor Yellow
-    Write-Host "  install          Install all dependencies (default)" -ForegroundColor White
-    Write-Host "  uninstall        Remove all generated files (back to factory state)" -ForegroundColor White
-    Write-Host "  env              Manage environment variables" -ForegroundColor White
-    Write-Host "  pkg              Manage packages" -ForegroundColor White
-    Write-Host "  template         Manage template generation" -ForegroundColor White
-    Write-Host "  help             Show this help" -ForegroundColor White
-    Write-Host ""
-    Write-Host "Env subcommands:" -ForegroundColor Yellow
-    Write-Host "  env list         List all environment variables" -ForegroundColor White
-    Write-Host "  env update       Regenerate .env file" -ForegroundColor White
-    Write-Host ""
-    Write-Host "Pkg subcommands:" -ForegroundColor Yellow
-    Write-Host "  pkg list         List all packages with status" -ForegroundColor White
-    Write-Host "  pkg update       Update/install packages interactively" -ForegroundColor White
-    Write-Host ""
-    Write-Host "Template subcommands:" -ForegroundColor Yellow
-    Write-Host "  template update  Regenerate all templates" -ForegroundColor White
-    Write-Host "  template apply <name>  Regenerate specific template" -ForegroundColor White
-    Write-Host ""
-    Write-Host "Examples:" -ForegroundColor Yellow
-    Write-Host "  box env update           # Regenerate all templates from .env and config" -ForegroundColor Gray
-    Write-Host "  box template apply Makefile  # Regenerate only Makefile" -ForegroundColor Gray
-    Write-Host "  box template apply README.md # Regenerate only README.md" -ForegroundColor Gray
-    Write-Host ""
-    Write-Host "Template system replaces {{TOKEN}} with values from .env and config files." -ForegroundColor Cyan
-    Write-Host "Backups are created automatically before regeneration (.bak.timestamp)." -ForegroundColor Cyan
-    Write-Host ""
+# BEGIN boxing.ps1 (functions only)
+# Boxing - Common bootstrapper for boxer and box
+#
+# This script serves as the shared foundation for both boxer.ps1 (global manager)
+# and box.ps1 (project manager). It handles:
+# - Mode detection (boxer vs box)
+# - Core library loading
+# - Module discovery and loading
+# - Command dispatching
+
+# Strict mode for better error detection
+Set-StrictMode -Version Latest
+$ErrorActionPreference = 'Stop'
+
+# Global variables
+$script:BoxingRoot = $PSScriptRoot
+$script:Mode = $null
+$script:LoadedModules = @{}
+$script:Commands = @{}
+
+# Detect execution mode
+function Initialize-Mode {
+    $scriptName = [System.IO.Path]::GetFileNameWithoutExtension($MyInvocation.PSCommandPath)
+
+    if ($scriptName -eq 'boxer') {
+        $script:Mode = 'boxer'
+    }
+    elseif ($scriptName -eq 'box') {
+        $script:Mode = 'box'
+    }
+    else {
+        throw "Unknown execution mode. Script must be named 'boxer.ps1' or 'box.ps1'"
+    }
+
+    return $script:Mode
 }
 
-if ($Help -or $Command -eq "help") {
-    Show-QuickHelp
-    exit 0
+# Load core libraries
+function Import-CoreLibraries {
+    $corePath = Join-Path $script:BoxingRoot 'core'
+
+    if (-not (Test-Path $corePath)) {
+        throw "Core directory not found: $corePath"
+    }
+
+    $coreFiles = Get-ChildItem -Path $corePath -Filter '*.ps1' | Sort-Object Name
+
+    foreach ($file in $coreFiles) {
+        try {
+            . $file.FullName
+            Write-Verbose "Loaded core: $($file.Name)"
+        }
+        catch {
+            throw "Failed to load core library $($file.Name): $_"
+        }
+    }
 }
 
-# ============================================================================
-# Base Paths (defined here, used by init.ps1)
-# ============================================================================
+# Discover and load mode-specific modules
+function Import-ModeModules {
+    param([string]$Mode)
 
-$_scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$_scriptDirName = Split-Path $_scriptDir -Leaf
+    $modulesPath = Join-Path $script:BoxingRoot "modules\$Mode"
 
-if ($_scriptDirName -eq '.box') {
-    # Running from .box/box.ps1 - BaseDir is parent of .box
-    $script:BaseDir = Split-Path -Parent $_scriptDir
-    $script:BoxDir = $_scriptDir
-} elseif ($_scriptDirName -eq 'scripts') {
-    # Running from scripts/ (development mode)
-    $script:BaseDir = Split-Path -Parent $_scriptDir
-    $script:BoxDir = Join-Path $BaseDir ".box"
-} else {
-    # Running from project root or other location
-    $script:BaseDir = $_scriptDir
-    $script:BoxDir = Join-Path $BaseDir ".box"
+    if (-not (Test-Path $modulesPath)) {
+        Write-Verbose "No modules found for mode: $Mode"
+        return
+    }
+
+    $moduleFiles = Get-ChildItem -Path $modulesPath -Filter '*.ps1' | Sort-Object Name
+
+    foreach ($file in $moduleFiles) {
+        try {
+            . $file.FullName
+
+            $commandName = [System.IO.Path]::GetFileNameWithoutExtension($file.Name)
+            $script:Commands[$commandName] = $file.FullName
+            $script:LoadedModules[$file.Name] = $file.FullName
+
+            Write-Verbose "Loaded module: $Mode/$($file.Name)"
+        }
+        catch {
+            Write-Warning "Failed to load module $($file.Name): $_"
+        }
+    }
 }
-$script:BoxCommand = $Command
+
+# Discover and load shared modules
+function Import-SharedModules {
+    $sharedPath = Join-Path $script:BoxingRoot 'modules\shared'
+
+    if (-not (Test-Path $sharedPath)) {
+        Write-Verbose "No shared modules found"
+        return
+    }
+
+    # Load complex modules with metadata
+    $metadataFiles = Get-ChildItem -Path $sharedPath -Filter 'metadata.psd1' -Recurse
+
+    foreach ($metaFile in $metadataFiles) {
+        try {
+            $metadata = Import-PowerShellDataFile -Path $metaFile.FullName
+            $moduleName = $metadata.ModuleName
+            $moduleDir = $metaFile.Directory.FullName
+
+            # Load all .ps1 files in the module directory
+            $moduleFiles = Get-ChildItem -Path $moduleDir -Filter '*.ps1'
+
+            foreach ($file in $moduleFiles) {
+                . $file.FullName
+                Write-Verbose "Loaded shared module: $moduleName/$($file.Name)"
+            }
+
+            # Register module commands
+            if ($metadata.Commands) {
+                foreach ($cmd in $metadata.Commands) {
+                    $script:Commands[$cmd] = $moduleName
+                }
+            }
+
+            $script:LoadedModules[$moduleName] = $moduleDir
+        }
+        catch {
+            Write-Warning "Failed to load shared module $($metaFile.Directory.Name): $_"
+        }
+    }
+}
+
+# Dispatch command to appropriate handler
+function Invoke-Command {
+    param(
+        [string]$CommandName,
+        [string[]]$Arguments
+    )
+
+    if (-not $script:Commands.ContainsKey($CommandName)) {
+        Write-Error "Unknown command: $CommandName"
+        Show-Help
+        return 1
+    }
+
+    try {
+        # Build function name from command
+        $functionName = "Invoke-$($script:Mode)-$CommandName"
+
+        if (Get-Command $functionName -ErrorAction SilentlyContinue) {
+            & $functionName @Arguments
+            return $LASTEXITCODE
+        }
+        else {
+            Write-Error "Command handler not found: $functionName"
+            return 1
+        }
+    }
+    catch {
+        Write-Error "Command execution failed: $_"
+        return 1
+    }
+}
+
+# Main bootstrapping function
+function Initialize-Boxing {
+    param(
+        [string[]]$Arguments
+    )
+
+    try {
+        # Step 1: Detect mode
+        $mode = Initialize-Mode
+        Write-Verbose "Mode: $mode"
+
+        # Step 2: Load core libraries
+        Import-CoreLibraries
+        Write-Verbose "Core libraries loaded"
+
+        # Step 3: Load mode-specific modules
+        Import-ModeModules -Mode $mode
+        Write-Verbose "Mode modules loaded: $($script:Commands.Count) commands"
+
+        # Step 4: Load shared modules
+        Import-SharedModules
+        Write-Verbose "Shared modules loaded"
+
+        # Step 5: Dispatch command
+        if ($Arguments.Count -gt 0) {
+            $command = $Arguments[0]
+            $cmdArgs = $Arguments[1..($Arguments.Count - 1)]
+
+            return Invoke-Command -CommandName $command -Arguments $cmdArgs
+        }
+        else {
+            Show-Help
+            return 0
+        }
+    }
+    catch {
+        Write-Error "Boxing initialization failed: $_"
+        return 1
+    }
+}
+
+# Export main entry point
+Export-ModuleMember -Function Initialize-Boxing
+
+# END boxing.ps1
 
 # ============================================================================
-# Initialize (loads configs, functions, and derived paths)
+# EMBEDDED core/*.ps1 (shared libraries)
 # ============================================================================
 
-
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# COMPILED MODULES (injected by build-box.ps1 - replaces init.ps1 loading)
-# ══════════════════════════════════════════════════════════════════════════════
-
-# ──────────────────────────────────────────────────────────────────────────────
-# Source: inc/commands.ps1
-# ──────────────────────────────────────────────────────────────────────────────
+# BEGIN core/commands.ps1
 # ============================================================================
 # Command Functions (Invoke-*)
 # ============================================================================
@@ -520,78 +643,160 @@ function Invoke-Init {
     Invoke-BoxInit
 }
 
-
-
-# ──────────────────────────────────────────────────────────────────────────────
-# Source: inc/common.ps1
-# ──────────────────────────────────────────────────────────────────────────────
+# END core/commands.ps1
+# BEGIN core/common.ps1
 # ============================================================================
-# Common Functions - State, Output, User Input, Config Merge
+# Common Functions - State Management
 # ============================================================================
+#
+# Consolidated common utilities, after extracting UI functions to ui.ps1
+# and config functions to config.ps1. This file now contains:
+# - State management (Load/Save/Get/Set/Remove package state)
 
 # ============================================================================
-# Logging
+# State Management
 # ============================================================================
 
-function Write-PackageLog {
+function Load-State {
     <#
     .SYNOPSIS
-    Writes a log message to the package installation log file.
+    Loads the package state from the state file.
 
     .DESCRIPTION
-    Appends a timestamped log entry to the package installation log.
-    Creates the log directory if it doesn't exist.
-
-    .PARAMETER Message
-    The message to log
-
-    .PARAMETER LogPath
-    Optional custom log path. If not specified, uses .box/logs/package-install.log
-
-    .PARAMETER Level
-    Log level: INFO, WARN, ERROR (default: INFO)
+    Returns a hashtable with package installation state.
+    Creates an empty state if file doesn't exist.
 
     .EXAMPLE
-    Write-PackageLog -Message "Installing package: vbcc" -Level INFO
+    $state = Load-State
+    #>
+    if (Test-Path $StateFile) {
+        return Get-Content $StateFile -Raw | ConvertFrom-Json -AsHashtable
+    }
+    return @{ packages = @{} }
+}
+
+function Save-State {
+    <#
+    .SYNOPSIS
+    Saves the package state to the state file.
+
+    .PARAMETER State
+    The state hashtable to save
+
+    .EXAMPLE
+    Save-State -State $state
+    #>
+    param([hashtable]$State)
+    $State | ConvertTo-Json -Depth 10 | Out-File $StateFile -Encoding UTF8
+}
+
+function Get-PackageState {
+    <#
+    .SYNOPSIS
+    Gets the state for a specific package.
+
+    .PARAMETER Name
+    The package name
+
+    .EXAMPLE
+    $pkgState = Get-PackageState -Name "vbcc"
+    #>
+    param([string]$Name)
+    $state = Load-State
+    if ($state.packages.ContainsKey($Name)) {
+        return $state.packages[$Name]
+    }
+    return $null
+}
+
+function Set-PackageState {
+    <#
+    .SYNOPSIS
+    Sets/updates the state for a specific package.
+
+    .PARAMETER Name
+    The package name
+
+    .PARAMETER Installed
+    Whether the package is installed
+
+    .PARAMETER Files
+    List of installed files
+
+    .PARAMETER Dirs
+    List of installed directories
+
+    .PARAMETER Envs
+    Environment variables set by the package
+
+    .EXAMPLE
+    Set-PackageState -Name "vbcc" -Installed $true -Files @() -Dirs @() -Envs @{}
     #>
     param(
-        [Parameter(Mandatory=$true)]
-        [string]$Message,
-
-        [string]$LogPath,
-
-        [ValidateSet('INFO', 'WARN', 'ERROR')]
-        [string]$Level = 'INFO'
+        [string]$Name,
+        [bool]$Installed,
+        [array]$Files,
+        [array]$Dirs,
+        [hashtable]$Envs
     )
-
-    # Determine log file path
-    if (-not $LogPath) {
-        $logDir = Join-Path $BaseDir ".box\logs"
-        if (-not (Test-Path $logDir)) {
-            New-Item -ItemType Directory -Path $logDir -Force | Out-Null
-        }
-        $LogPath = Join-Path $logDir "package-install.log"
+    $state = Load-State
+    $state.packages[$Name] = @{
+        installed = $Installed
+        files = $Files
+        dirs = if ($Dirs) { $Dirs } else { @() }
+        envs = $Envs
+        date = (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")
     }
+    Save-State $state
+}
 
-    # Format log entry
-    $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
-    $logEntry = "[$timestamp] [$Level] $Message"
+function Remove-PackageState {
+    <#
+    .SYNOPSIS
+    Removes the state for a specific package.
 
-    # Append to log file
-    try {
-        Add-Content -Path $LogPath -Value $logEntry -Encoding UTF8
-    }
-    catch {
-        # Silently fail if logging fails (don't block operations)
-        Write-Verbose "Failed to write log: $_"
+    .PARAMETER Name
+    The package name
+
+    .EXAMPLE
+    Remove-PackageState -Name "vbcc"
+    #>
+    param([string]$Name)
+    $state = Load-State
+    if ($state.packages.ContainsKey($Name)) {
+        $state.packages.Remove($Name)
+        Save-State $state
     }
 }
 
+# END core/common.ps1
+# BEGIN core/config.ps1
 # ============================================================================
-# Configuration Merge
+# Configuration Management
 # ============================================================================
+#
+# This file contains configuration merge utilities extracted from common.ps1
 
 function Merge-Hashtable {
+    <#
+    .SYNOPSIS
+    Recursively merges two hashtables.
+
+    .DESCRIPTION
+    Merges Override into Base, with Override values taking precedence.
+    - Nested hashtables are merged recursively
+    - Arrays are concatenated (Override first for priority)
+    - Other values are replaced by Override
+
+    .PARAMETER Base
+    The base hashtable
+
+    .PARAMETER Override
+    The override hashtable
+
+    .EXAMPLE
+    $merged = Merge-Hashtable -Base $defaults -Override $userConfig
+    #>
     param(
         [hashtable]$Base,
         [hashtable]$Override
@@ -628,6 +833,22 @@ function Merge-Hashtable {
 }
 
 function Merge-Config {
+    <#
+    .SYNOPSIS
+    Merges system configuration with user configuration.
+
+    .DESCRIPTION
+    Convenience wrapper around Merge-Hashtable for config merging.
+
+    .PARAMETER SysConfig
+    System/default configuration
+
+    .PARAMETER UserConfig
+    User configuration (overrides)
+
+    .EXAMPLE
+    $config = Merge-Config -SysConfig $sysConfig -UserConfig $userConfig
+    #>
     param(
         [hashtable]$SysConfig,
         [hashtable]$UserConfig
@@ -636,193 +857,8 @@ function Merge-Config {
     return Merge-Hashtable $SysConfig $UserConfig
 }
 
-# ============================================================================
-# State Management
-# ============================================================================
-
-function Load-State {
-    if (Test-Path $StateFile) {
-        return Get-Content $StateFile -Raw | ConvertFrom-Json -AsHashtable
-    }
-    return @{ packages = @{} }
-}
-
-function Save-State {
-    param([hashtable]$State)
-    $State | ConvertTo-Json -Depth 10 | Out-File $StateFile -Encoding UTF8
-}
-
-function Get-PackageState {
-    param([string]$Name)
-    $state = Load-State
-    if ($state.packages.ContainsKey($Name)) {
-        return $state.packages[$Name]
-    }
-    return $null
-}
-
-function Set-PackageState {
-    param(
-        [string]$Name,
-        [bool]$Installed,
-        [array]$Files,
-        [array]$Dirs,
-        [hashtable]$Envs
-    )
-    $state = Load-State
-    $state.packages[$Name] = @{
-        installed = $Installed
-        files = $Files
-        dirs = if ($Dirs) { $Dirs } else { @() }
-        envs = $Envs
-        date = (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")
-    }
-    Save-State $state
-}
-
-function Remove-PackageState {
-    param([string]$Name)
-    $state = Load-State
-    if ($state.packages.ContainsKey($Name)) {
-        $state.packages.Remove($Name)
-        Save-State $state
-    }
-}
-
-# ============================================================================
-# Output Functions
-# ============================================================================
-
-function Write-Step {
-    param([string]$Message)
-    Write-Host ""
-    Write-Host "=== $Message ===" -ForegroundColor Cyan
-}
-
-function Write-Info {
-    param([string]$Message)
-    Write-Host "    $Message" -ForegroundColor Gray
-}
-
-function Write-Success {
-    param([string]$Message)
-    Write-Host "    $Message" -ForegroundColor Green
-}
-
-function Write-Err {
-    param([string]$Message)
-    Write-Host "    $Message" -ForegroundColor Red
-}
-
-function Write-Warn {
-    param([string]$Message)
-    Write-Host "    [WARN] $Message" -ForegroundColor Yellow
-}
-
-# ============================================================================
-# User Input Functions
-# ============================================================================
-
-function Ask-YesNo {
-    param(
-        [string]$Question,
-        [bool]$Default = $true
-    )
-    $defaultText = if ($Default) { "Y/n" } else { "y/N" }
-    $response = Read-Host "$Question [$defaultText]"
-    if ([string]::IsNullOrWhiteSpace($response)) { return $Default }
-    return $response -match '^[Yy]'
-}
-
-function Ask-Choice {
-    param(
-        [string]$Question,
-        [string]$Default = "S"
-    )
-    $response = Read-Host "$Question"
-    if ([string]::IsNullOrWhiteSpace($response)) { return $Default.ToUpper() }
-    return $response.Substring(0,1).ToUpper()
-}
-
-function Ask-String {
-    param(
-        [string]$Prompt,
-        [string]$Default = "",
-        [bool]$Required = $true
-    )
-
-    $defaultText = if ($Default) { " [$Default]" } else { "" }
-    $response = Read-Host "    $Prompt$defaultText"
-
-    if ([string]::IsNullOrWhiteSpace($response)) {
-        if ($Default) { return $Default }
-        if ($Required) {
-            Write-Err "Value is required!"
-            exit 1
-        }
-        return ""
-    }
-    return $response
-}
-
-function Ask-Number {
-    param(
-        [string]$Prompt,
-        [int]$Default = 0,
-        [int]$Min = [int]::MinValue,
-        [int]$Max = [int]::MaxValue
-    )
-
-    $defaultText = if ($Default -ne 0) { " [$Default]" } else { "" }
-    $response = Read-Host "    $Prompt$defaultText"
-
-    if ([string]::IsNullOrWhiteSpace($response)) {
-        return $Default
-    }
-
-    $number = 0
-    if (-not [int]::TryParse($response, [ref]$number)) {
-        Write-Err "Invalid number: $response"
-        exit 1
-    }
-
-    if ($number -lt $Min -or $number -gt $Max) {
-        Write-Err "Number must be between $Min and $Max"
-        exit 1
-    }
-
-    return $number
-}
-
-function Ask-Path {
-    param(
-        [string]$Prompt,
-        [string]$Default = "",
-        [bool]$MustExist = $true
-    )
-
-    $path = Ask-String -Prompt $Prompt -Default $Default -Required $MustExist
-
-    if ([string]::IsNullOrWhiteSpace($path)) { return "" }
-
-    # Convert to absolute if relative
-    if (-not [System.IO.Path]::IsPathRooted($path)) {
-        $path = Join-Path $BaseDir $path
-    }
-
-    if ($MustExist -and -not (Test-Path $path)) {
-        Write-Err "Path does not exist: $path"
-        exit 1
-    }
-
-    return $path
-}
-
-
-
-# ──────────────────────────────────────────────────────────────────────────────
-# Source: inc/constants.ps1
-# ──────────────────────────────────────────────────────────────────────────────
+# END core/config.ps1
+# BEGIN core/constants.ps1
 # ============================================================================
 # Constants and helper functions for inc/ modules
 # ============================================================================
@@ -863,11 +899,8 @@ function Source-Rel {
     . $full
 }
 
-
-
-# ──────────────────────────────────────────────────────────────────────────────
-# Source: inc/directories.ps1
-# ──────────────────────────────────────────────────────────────────────────────
+# END core/constants.ps1
+# BEGIN core/directories.ps1
 # ============================================================================
 # Directory Management Functions
 # ============================================================================
@@ -1005,11 +1038,8 @@ function Remove-EmptyParents {
     }
 }
 
-
-
-# ──────────────────────────────────────────────────────────────────────────────
-# Source: inc/download.ps1
-# ──────────────────────────────────────────────────────────────────────────────
+# END core/directories.ps1
+# BEGIN core/download.ps1
 # ============================================================================
 # Download Functions
 # ============================================================================
@@ -1244,11 +1274,8 @@ function Download-File {
     }
 }
 
-
-
-# ──────────────────────────────────────────────────────────────────────────────
-# Source: inc/envs.ps1
-# ──────────────────────────────────────────────────────────────────────────────
+# END core/download.ps1
+# BEGIN core/envs.ps1
 # ============================================================================
 # Environment Files Generation
 # ============================================================================
@@ -1296,28 +1323,14 @@ function Generate-DotEnvFile {
         $lines += "VERSION=$($Config.Project.Version)"
     }
 
-    # CPU/FPU from config (direct or nested)
-    if ($Config.DefaultCPU) {
-        $lines += "DEFAULT_CPU=$($Config.DefaultCPU)"
-    } elseif ($Config.Project -and $Config.Project.DefaultCPU) {
-        $lines += "DEFAULT_CPU=$($Config.Project.DefaultCPU)"
-    }
-
-    if ($Config.DefaultFPU) {
-        $lines += "DEFAULT_FPU=$($Config.DefaultFPU)"
-    } elseif ($Config.Project -and $Config.Project.DefaultFPU) {
-        $lines += "DEFAULT_FPU=$($Config.Project.DefaultFPU)"
-    }
-
     $lines += ""
-    $lines += "# Project Paths"
+    $lines += "# Build Configuration"
 
-    # Paths from merged config
-    if ($Config.Paths) {
-        foreach ($key in $Config.Paths.Keys) {
-            $value = $Config.Paths[$key]
-            $envKey = ($key -creplace '([A-Z])', '_$1').ToUpper().TrimStart('_')
-            $lines += "$envKey=$value"
+    # Build settings - use keys as-is (no transformation)
+    if ($Config.Build) {
+        foreach ($key in $Config.Build.Keys) {
+            $value = $Config.Build[$key]
+            $lines += "$key=$value"
         }
     }
 
@@ -1367,27 +1380,20 @@ function Show-EnvList {
     Write-Host "  [Project Settings]" -ForegroundColor Yellow
     if ($Config.Project) {
         if ($Config.Project.Name) {
-            Write-Host "    PROGRAM_NAME = $($Config.Project.Name)" -ForegroundColor White
-        }
-        if ($Config.Project.DefaultCPU) {
-            Write-Host "    DEFAULT_CPU = $($Config.Project.DefaultCPU)" -ForegroundColor White
-        }
-        if ($Config.Project.DefaultFPU) {
-            Write-Host "    DEFAULT_FPU = $($Config.Project.DefaultFPU)" -ForegroundColor White
+            Write-Host "    PROJECT_NAME = $($Config.Project.Name)" -ForegroundColor White
         }
         if ($Config.Project.Version) {
             Write-Host "    VERSION = $($Config.Project.Version)" -ForegroundColor White
         }
     }
 
-    # Paths
+    # Build configuration
     Write-Host ""
-    Write-Host "  [Project Paths]" -ForegroundColor Yellow
-    if ($Config.Paths) {
-        foreach ($key in $Config.Paths.Keys) {
-            $value = $Config.Paths[$key]
-            $envKey = ($key -creplace '([A-Z])', '_$1').ToUpper().TrimStart('_')
-            Write-Host "    $envKey = $value" -ForegroundColor White
+    Write-Host "  [Build Configuration]" -ForegroundColor Yellow
+    if ($Config.Build) {
+        foreach ($key in $Config.Build.Keys) {
+            $value = $Config.Build[$key]
+            Write-Host "    $key = $value" -ForegroundColor White
         }
     }
 
@@ -1418,11 +1424,8 @@ function Show-EnvList {
     Write-Host ""
 }
 
-
-
-# ──────────────────────────────────────────────────────────────────────────────
-# Source: inc/extract.ps1
-# ──────────────────────────────────────────────────────────────────────────────
+# END core/envs.ps1
+# BEGIN core/extract.ps1
 # ============================================================================
 # Extract Functions
 # ============================================================================
@@ -1745,11 +1748,8 @@ function Ask-ManualEnvs {
     return $envs
 }
 
-
-
-# ──────────────────────────────────────────────────────────────────────────────
-# Source: inc/functions.ps1
-# ──────────────────────────────────────────────────────────────────────────────
+# END core/extract.ps1
+# BEGIN core/functions.ps1
 # ============================================================================
 # AmigaDevBox - Box Functions Loader
 # ============================================================================
@@ -1766,25 +1766,24 @@ if ($BoxDir) {
 }
 
 # Load all modules directly (dot-source must be at script level, not inside a function)
+. "$script:IncDir\constants.ps1"
+. "$script:IncDir\common.ps1"
+. "$script:IncDir\sevenzip.ps1"
+. "$script:IncDir\download.ps1"
+. "$script:IncDir\extract.ps1"
+. "$script:IncDir\makefile.ps1"
+. "$script:IncDir\envs.ps1"
+. "$script:IncDir\packages.ps1"
+. "$script:IncDir\directories.ps1"
+. "$script:IncDir\ui.ps1"
+. "$script:IncDir\help.ps1"
+. "$script:IncDir\wizard.ps1"
+. "$script:IncDir\templates.ps1"
+. "$script:IncDir\commands.ps1"
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-# ──────────────────────────────────────────────────────────────────────────────
-# Source: inc/help.ps1
-# ──────────────────────────────────────────────────────────────────────────────
+# END core/functions.ps1
+# BEGIN core/help.ps1
 # ============================================================================
 # Help Functions
 # ============================================================================
@@ -1810,11 +1809,8 @@ function Show-Help {
     Write-Host ""
 }
 
-
-
-# ──────────────────────────────────────────────────────────────────────────────
-# Source: inc/init.ps1
-# ──────────────────────────────────────────────────────────────────────────────
+# END core/help.ps1
+# BEGIN core/init.ps1
 # ============================================================================
 # AmigaDevBox - Initialization Module
 # ============================================================================
@@ -1842,6 +1838,12 @@ $script:EnvFile = Join-Path $BaseDir ".env"
 # Load Functions (before config loading - needed for Merge-Config)
 # ============================================================================
 
+$script:FunctionsLoader = Join-Path $BoxDir $FUNCTIONS_LOADER
+if (-not (Test-Path $FunctionsLoader)) {
+    Write-Host "Functions loader not found: $FunctionsLoader" -ForegroundColor Red
+    exit 1
+}
+. $FunctionsLoader
 
 # ============================================================================
 # Configuration Loading
@@ -1928,11 +1930,8 @@ $script:SevenZipDll = Join-Path $BoxToolsDir "7z.dll"
 # All packages (merged - UserConfig.Packages first for priority)
 $script:AllPackages = if ($Config.Packages) { $Config.Packages } else { @() }
 
-
-
-# ──────────────────────────────────────────────────────────────────────────────
-# Source: inc/makefile.ps1
-# ──────────────────────────────────────────────────────────────────────────────
+# END core/init.ps1
+# BEGIN core/makefile.ps1
 # ============================================================================
 # Makefile Generation Functions
 # ============================================================================
@@ -1954,453 +1953,44 @@ function Setup-Makefile {
     }
 }
 
-
-
-# ──────────────────────────────────────────────────────────────────────────────
-# Source: inc/packages.ps1
-# ──────────────────────────────────────────────────────────────────────────────
+# END core/makefile.ps1
+# BEGIN core/packages.ps1
 # ============================================================================
-# Package Management Functions
+# Package Management Shim
 # ============================================================================
+#
+# This file is a shim that redirects to the modular pkg module.
+# All package functions are now in modules/shared/pkg/*.ps1
+#
+# Module structure:
+# - modules/shared/pkg/metadata.psd1     - Module definition
+# - modules/shared/pkg/state.ps1         - State management (6 functions)
+# - modules/shared/pkg/extraction.ps1    - Extraction logic (7 functions)
+# - modules/shared/pkg/dependencies.ps1  - Dependency validation (2 functions)
+# - modules/shared/pkg/install.ps1       - Installation (1 function)
+# - modules/shared/pkg/uninstall.ps1     - Uninstallation (1 function)
+# - modules/shared/pkg/list.ps1          - Package listing (1 function)
+#
+# This shim exists for backward compatibility during the transition.
+# Once all callers are updated to use the pkg module directly,
+# this file can be removed.
 
-function Test-PackageInstalled {
-    <#
-    .SYNOPSIS
-    Checks if a package is already installed via system, vendor, or environment variable.
+Write-Warn "core/packages.ps1 is deprecated. Use modules/shared/pkg/*.ps1 instead."
 
-    .DESCRIPTION
-    Detection priority:
-    1. DetectEnv - Environment variable exists (fastest)
-    2. DetectFile - File found in system PATH
-    3. DetectFile - File found in vendor/tools/
-    4. DetectCommand - Command executes successfully
-    5. Package state - Previously installed by box
+# Load pkg module functions for backward compatibility
+$pkgModulePath = Join-Path (Split-Path $PSScriptRoot -Parent) "modules\shared\pkg"
 
-    .PARAMETER Package
-    Hashtable with package definition including DetectEnv, DetectFile, DetectCommand properties
-
-    .OUTPUTS
-    PSCustomObject with properties: Installed (bool), Source (string), Path (string)
-    #>
-    param([hashtable]$Package)
-
-    # Priority 1: Environment variable
-    if ($Package.DetectEnv) {
-        $envValue = [System.Environment]::GetEnvironmentVariable($Package.DetectEnv)
-        if ($envValue) {
-            Write-Info "Found $($Package.Name) via `$env:$($Package.DetectEnv): $envValue"
-            return @{
-                Installed = $true
-                Source = "env"
-                Path = $envValue
-            }
-        }
+if (Test-Path $pkgModulePath) {
+    # Load all pkg module files
+    Get-ChildItem -Path $pkgModulePath -Filter *.ps1 -Recurse | ForEach-Object {
+        . $_.FullName
     }
-
-    # Priority 2: File in system PATH
-    if ($Package.DetectFile) {
-        $systemCmd = Get-Command $Package.DetectFile -ErrorAction SilentlyContinue
-        if ($systemCmd) {
-            Write-Info "Found system $($Package.Name): $($systemCmd.Source)"
-            return @{
-                Installed = $true
-                Source = "system"
-                Path = $systemCmd.Source
-            }
-        }
-
-        # Priority 3: File in vendor/tools/
-        $vendorPath = Join-Path $VendorDir "tools/$($Package.DetectFile)"
-        if (Test-Path $vendorPath) {
-            Write-Info "Found local $($Package.Name): $vendorPath"
-            return @{
-                Installed = $true
-                Source = "vendor"
-                Path = $vendorPath
-            }
-        }
-    }
-
-    # Priority 4: Execute command test
-    if ($Package.DetectCommand) {
-        try {
-            $null = Invoke-Expression "$($Package.DetectCommand) 2>&1"
-            if ($LASTEXITCODE -eq 0) {
-                Write-Info "Verified $($Package.Name) via: $($Package.DetectCommand)"
-                return @{
-                    Installed = $true
-                    Source = "command"
-                    Path = $Package.DetectCommand
-                }
-            }
-        } catch {
-            # Command failed, continue
-        }
-    }
-
-    # Priority 5: Package state (installed by box previously)
-    $state = Get-PackageState -Name $Package.Name
-    if ($state -and $state.installed) {
-        return @{
-            Installed = $true
-            Source = "state"
-            Path = "vendor/$($Package.Name)"
-        }
-    }
-
-    return @{
-        Installed = $false
-        Source = $null
-        Path = $null
-    }
+} else {
+    Write-Error "Package module not found: $pkgModulePath"
 }
 
-function Ensure-Tool {
-    <#
-    .SYNOPSIS
-    Ensures a critical tool is available, auto-installing to vendor/tools/ if missing.
-
-    .DESCRIPTION
-    Used for essential tools like 7z.exe that are required for package extraction.
-    Checks system PATH first, then vendor/tools/, then auto-installs if missing.
-
-    .PARAMETER ToolName
-    Name of the tool executable (e.g., "7z.exe")
-
-    .PARAMETER PackageConfig
-    Hashtable with package definition for auto-install (Name, Url, File, Archive, Extract)
-
-    .OUTPUTS
-    String path to the tool executable
-    #>
-    param(
-        [string]$ToolName,
-        [hashtable]$PackageConfig
-    )
-
-    # Check system PATH
-    $systemTool = Get-Command $ToolName -ErrorAction SilentlyContinue
-    if ($systemTool) {
-        Write-Info "Using system $ToolName from: $($systemTool.Source)"
-        return $systemTool.Source
-    }
-
-    # Check vendor/tools/
-    $vendorPath = Join-Path $VendorDir "tools/$ToolName"
-    if (Test-Path $vendorPath) {
-        Write-Info "Using local $ToolName from: $vendorPath"
-        return $vendorPath
-    }
-
-    # Auto-install
-    Write-Info "Installing $ToolName to vendor/tools/..."
-
-    $sourceType = if ($PackageConfig.SourceType) { $PackageConfig.SourceType } else { "http" }
-    $archive = Download-File -Url $PackageConfig.Url -FileName $PackageConfig.File -SourceType $sourceType
-
-    if (-not $archive) {
-        Write-Err "Failed to download $ToolName"
-        throw "Cannot proceed without $ToolName"
-    }
-
-    $result = Extract-Package -Archive $archive -Name $PackageConfig.Name -ArchiveType $PackageConfig.Archive -ExtractRules $PackageConfig.Extract
-
-    if (Test-Path $vendorPath) {
-        Write-Success "$ToolName installed successfully"
-        return $vendorPath
-    } else {
-        throw "$ToolName installation failed"
-    }
-}
-
-function Validate-PackageDependencies {
-    <#
-    .SYNOPSIS
-    Validates that required environment variables exist when package installation is refused.
-
-    .DESCRIPTION
-    When user chooses not to install a package, this function:
-    1. Extracts required env vars from Extract rules
-    2. Checks if env vars already exist
-    3. Prompts for manual paths if missing
-    4. Validates paths with Test-Path
-    5. Saves to .env file
-
-    .PARAMETER Package
-    Hashtable with package definition including Extract rules
-
-    .OUTPUTS
-    Hashtable of environment variable names and paths
-    #>
-    param([hashtable]$Package)
-
-    # Extract required env vars from Extract rules
-    $requiredEnvs = @()
-    if ($Package.Extract) {
-        foreach ($rule in $Package.Extract) {
-            if ($rule -match ':([A-Z_]+)$') {
-                $requiredEnvs += $Matches[1]
-            }
-        }
-    }
-
-    if ($requiredEnvs.Count -eq 0) {
-        return @{}
-    }
-
-    $envPaths = @{}
-
-    foreach ($envVar in $requiredEnvs) {
-        # Check if already set
-        $existingValue = [System.Environment]::GetEnvironmentVariable($envVar)
-        if ($existingValue) {
-            $envPaths[$envVar] = $existingValue
-            Write-Info "$envVar already set to: $existingValue"
-            continue
-        }
-
-        # Prompt for manual path
-        Write-Warn "$envVar is required for compilation/build"
-
-        while ($true) {
-            $manualPath = Read-Host "Enter path for $envVar (or 'skip' to abort)"
-
-            if ($manualPath -eq 'skip' -or [string]::IsNullOrWhiteSpace($manualPath)) {
-                Write-Err "Missing required dependency: $envVar"
-                throw "Cannot proceed without $envVar"
-            }
-
-            # Validate path
-            if (Test-Path $manualPath) {
-                $envPaths[$envVar] = $manualPath
-
-                # Save to .env
-                $envFilePath = Join-Path $ProjectRoot ".env"
-                Add-Content -Path $envFilePath -Value "$envVar=$manualPath"
-
-                # Set in current session
-                [System.Environment]::SetEnvironmentVariable($envVar, $manualPath)
-
-                Write-Success "Set $envVar=$manualPath"
-                break
-            } else {
-                Write-Warn "Path not found: $manualPath"
-                Write-Info "Please provide a valid path or type 'skip' to abort"
-            }
-        }
-    }
-
-    return $envPaths
-}
-
-function Remove-Package {
-    param([string]$Name)
-
-    $pkgState = Get-PackageState $Name
-    if (-not $pkgState) { return }
-
-    if ($pkgState.installed -and $pkgState.files) {
-        foreach ($file in $pkgState.files) {
-            if (Test-Path $file) {
-                Remove-Item $file -Recurse -Force -ErrorAction SilentlyContinue
-                Write-Info "Removed: $file"
-            }
-        }
-    }
-
-    Remove-PackageState $Name
-}
-
-function Process-Package {
-    param([hashtable]$Item)
-
-    $name = $Item.Name
-    $mode = if ($Item.Mode) { $Item.Mode } else { "auto" }
-    $pkgState = Get-PackageState $name
-    $isInstalled = $pkgState -and $pkgState.installed
-    $isManual = $pkgState -and -not $pkgState.installed
-    $existingEnvs = if ($pkgState -and $pkgState.envs) { $pkgState.envs } else { @{} }
-
-    Write-Step "$name - $($Item.Description)"
-
-    # T029: Check if package already installed via system/vendor/env (US3)
-    $detection = Test-PackageInstalled -Package $Item
-
-    # Skip the "install anyway?" prompt for local installations (state/vendor source)
-    # Go directly to the "Local installation found" prompt instead
-    if ($detection.Installed -and $detection.Source -notin @("state", "vendor")) {
-        # T030: Prompt user to use existing installation (global/system only)
-        $sourceLabel = if ($detection.Source -eq "env") { "global" } elseif ($detection.Source -eq "command") { "system" } else { $detection.Source }
-        Write-Info "Found $sourceLabel installation: $($detection.Path)"
-        $useExisting = Ask-Choice "Install locally in project anyway? [y/N]"
-
-        if ($useExisting -ne "Y") {
-            Write-Success "Using $sourceLabel $name"
-            # Don't save any state - we're just using the existing installation
-            # The detection will find it again next time
-            return
-        }
-        # User chose to install anyway, continue below
-    }
-
-    # Already installed -> ask: Keep, Reinstall, Manual
-    if ($isInstalled) {
-        $choice = Ask-Choice "Local installation found. [K]eep / [R]einstall / [M]anual?"
-
-        switch ($choice) {
-            "K" {
-                Write-Info "Keeping existing local installation"
-                return
-            }
-            "R" {
-                Write-Info "Removing previous installation..."
-                Remove-Package $name
-                # Continue to install below
-            }
-            "M" {
-                $envs = Ask-ManualEnvs -ExtractRules $Item.Extract -ExistingEnvs $existingEnvs
-                Set-PackageState -Name $name -Installed $false -Files @() -Dirs @() -Envs $envs
-                Write-Success "Manual paths configured"
-                return
-            }
-        }
-    }
-    # Manual config exists -> ask: Skip, Install, Reconfigure
-    elseif ($isManual) {
-        $choice = Ask-Choice "$name has manual config. [S]kip / [I]nstall / [R]econfigure?"
-
-        switch ($choice) {
-            "S" {
-                Write-Info "Skipped"
-                return
-            }
-            "I" {
-                # Continue to install below
-            }
-            "R" {
-                $envs = Ask-ManualEnvs -ExtractRules $Item.Extract -ExistingEnvs $existingEnvs
-                Set-PackageState -Name $name -Installed $false -Files @() -Dirs @() -Envs $envs
-                Write-Success "Manual paths reconfigured"
-                return
-            }
-        }
-    }
-    # Not installed -> ask if mode=ask, otherwise auto-install
-    else {
-        if ($mode -eq "ask") {
-            $choice = Ask-Choice "Install? [Y/n]"
-
-            if ($choice -eq "N") {
-                # T031-T032: User refused install, validate dependencies
-                try {
-                    $envs = Validate-PackageDependencies -Package $Item
-                    Set-PackageState -Name $name -Installed $false -Files @() -Dirs @() -Envs $envs
-                    Write-Success "Manual paths configured"
-                } catch {
-                    Write-Err "Dependency validation failed: $_"
-                }
-                return
-            }
-        }
-        # mode=auto or user said Yes -> continue to install
-    }
-
-    # Detect SourceType (T016)
-    $sourceType = if ($Item.SourceType) { $Item.SourceType } else { "http" }
-
-    # Download and install
-    $archive = Download-File -Url $Item.Url -FileName $Item.File -SourceType $sourceType
-
-    if (-not $archive) {
-        Write-Err "Download failed for $name"
-        return
-    }
-
-    if ($Item.Archive -eq "file") {
-        $result = Install-SingleFile -FilePath $archive -Name $name -ExtractRules $Item.Extract
-    } else {
-        $result = Extract-Package -Archive $archive -Name $name -ArchiveType $Item.Archive -ExtractRules $Item.Extract
-    }
-
-    Set-PackageState -Name $name -Installed $true -Files $result.Files -Dirs $result.Dirs -Envs $result.Envs
-    Write-Success "Installed"
-}
-
-function Show-PackageList {
-    Write-Host ""
-    Write-Host "Packages:" -ForegroundColor Cyan
-    Write-Host ""
-
-    $state = Load-State
-
-    # Table columns
-    $colName = 20
-    $colEnv = 18
-    $colValue = 35
-    $colStatus = 9
-
-    Write-Host ("  {0,-$colName} {1,-$colEnv} {2,-$colValue} {3}" -f "NAME", "ENV VARS", "DESCRIPTION", "INSTALLED") -ForegroundColor DarkGray
-    Write-Host ("  {0,-$colName} {1,-$colEnv} {2,-$colValue} {3}" -f ("-" * $colName), ("-" * $colEnv), ("-" * $colValue), ("-" * $colStatus)) -ForegroundColor DarkGray
-
-    foreach ($item in $AllPackages) {
-        $name = $item.Name
-        $pkgState = if ($state.packages.ContainsKey($name)) { $state.packages[$name] } else { $null }
-
-        # Get ENV vars (from state if installed, from rules if not)
-        $envVars = @{}
-        if ($pkgState -and $pkgState.envs) {
-            $envVars = $pkgState.envs
-        } elseif ($item.Extract) {
-            foreach ($rule in $item.Extract) {
-                $parsed = Parse-ExtractRule $rule
-                if ($parsed -and $parsed.EnvVar) {
-                    $envVars[$parsed.EnvVar] = $null
-                }
-            }
-        }
-
-        # Status indicator (last column)
-        $isInstalled = $pkgState -and $pkgState.installed
-        $isManual = $pkgState -and -not $pkgState.installed
-        $hasEnvVars = $envVars.Count -gt 0
-        $statusMark = if ($isInstalled) { [char]0x1F60A } elseif ($isManual) { [char]0x1F4E6 } else { "" }
-        $statusColor = if ($isInstalled) { "Green" } elseif ($isManual) { "Yellow" } else { "DarkGray" }
-
-        # First line: package name + first ENV or description
-        $firstEnv = $envVars.Keys | Select-Object -First 1
-
-        Write-Host ("  {0,-$colName}" -f $name) -ForegroundColor White -NoNewline
-
-        if ($firstEnv) {
-            $firstValue = if ($envVars[$firstEnv]) { $envVars[$firstEnv] } else { $item.Description }
-            $valueColor = if ($envVars[$firstEnv]) { "Gray" } else { "DarkGray" }
-            Write-Host (" {0,-$colEnv}" -f $firstEnv) -ForegroundColor Cyan -NoNewline
-            Write-Host (" {0,-$colValue}" -f $firstValue) -ForegroundColor $valueColor -NoNewline
-        } else {
-            Write-Host (" {0,-$colEnv} {1,-$colValue}" -f "", $item.Description) -ForegroundColor DarkGray -NoNewline
-        }
-        Write-Host $statusMark -ForegroundColor $statusColor
-
-        # Additional ENV vars (skip first)
-        $remaining = $envVars.Keys | Select-Object -Skip 1
-        foreach ($envName in $remaining) {
-            $envValue = if ($envVars[$envName]) { $envVars[$envName] } else { $item.Description }
-            $valueColor = if ($envVars[$envName]) { "Gray" } else { "DarkGray" }
-
-            Write-Host ("  {0,-$colName}" -f "") -NoNewline
-            Write-Host (" {0,-$colEnv}" -f $envName) -ForegroundColor Cyan -NoNewline
-            Write-Host (" {0,-$colValue}" -f $envValue) -ForegroundColor $valueColor
-        }
-    }
-
-    Write-Host ""
-}
-
-
-
-# ──────────────────────────────────────────────────────────────────────────────
-# Source: inc/sevenzip.ps1
-# ──────────────────────────────────────────────────────────────────────────────
+# END core/packages.ps1
+# BEGIN core/sevenzip.ps1
 # ============================================================================
 # 7-Zip Setup
 # ============================================================================
@@ -2446,11 +2036,8 @@ function Ensure-SevenZip {
     }
 }
 
-
-
-# ──────────────────────────────────────────────────────────────────────────────
-# Source: inc/templates.ps1
-# ──────────────────────────────────────────────────────────────────────────────
+# END core/sevenzip.ps1
+# BEGIN core/templates.ps1
 <#
 .SYNOPSIS
     Template processor module for DevBox
@@ -3149,26 +2736,188 @@ function Invoke-BoxInit {
     }
 }
 
-
-
-# ──────────────────────────────────────────────────────────────────────────────
-# Source: inc/ui.ps1
-# ──────────────────────────────────────────────────────────────────────────────
+# END core/templates.ps1
+# BEGIN core/ui.ps1
 # ============================================================================
-# UI Functions (completion messages, etc.)
+# UI Functions - Consolidated output and user input
+# ============================================================================
+#
+# This file consolidates all UI-related functions from common.ps1 and ui.ps1:
+# - Output functions (Write-*)
+# - User input functions (Ask-*)
+# - Display functions (Show-*)
+
+# ============================================================================
+# Output Functions
+# ============================================================================
+
+function Write-Step {
+    param([string]$Message)
+    Write-Host ""
+    Write-Host "=== $Message ===" -ForegroundColor Cyan
+}
+
+function Write-Info {
+    param([string]$Message)
+    Write-Host "    $Message" -ForegroundColor Gray
+}
+
+function Write-Success {
+    param([string]$Message)
+    Write-Host "    $Message" -ForegroundColor Green
+}
+
+function Write-Err {
+    param([string]$Message)
+    Write-Host "    $Message" -ForegroundColor Red
+}
+
+function Write-Warn {
+    param([string]$Message)
+    Write-Host "    [WARN] $Message" -ForegroundColor Yellow
+}
+
+function Write-PackageLog {
+    param(
+        [Parameter(Mandatory=$true)]
+        [string]$Message,
+        [string]$LogPath,
+        [ValidateSet('INFO', 'WARN', 'ERROR')]
+        [string]$Level = 'INFO'
+    )
+
+    if (-not $LogPath) {
+        $logDir = Join-Path $BaseDir ".box\logs"
+        if (-not (Test-Path $logDir)) {
+            New-Item -ItemType Directory -Path $logDir -Force | Out-Null
+        }
+        $LogPath = Join-Path $logDir "package-install.log"
+    }
+
+    $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+    $logEntry = "[$timestamp] [$Level] $Message"
+
+    try {
+        Add-Content -Path $LogPath -Value $logEntry -Encoding UTF8
+    }
+    catch {
+        Write-Verbose "Failed to write log: $_"
+    }
+}
+
+# ============================================================================
+# User Input Functions
+# ============================================================================
+
+function Ask-YesNo {
+    param(
+        [string]$Question,
+        [bool]$Default = $true
+    )
+    $defaultText = if ($Default) { "Y/n" } else { "y/N" }
+    $response = Read-Host "$Question [$defaultText]"
+    if ([string]::IsNullOrWhiteSpace($response)) { return $Default }
+    return $response -match '^[Yy]'
+}
+
+function Ask-Choice {
+    param(
+        [string]$Question,
+        [string]$Default = "S"
+    )
+    $response = Read-Host "$Question"
+    if ([string]::IsNullOrWhiteSpace($response)) { return $Default.ToUpper() }
+    return $response.Substring(0,1).ToUpper()
+}
+
+function Ask-String {
+    param(
+        [string]$Prompt,
+        [string]$Default = "",
+        [bool]$Required = $true
+    )
+
+    $defaultText = if ($Default) { " [$Default]" } else { "" }
+    $response = Read-Host "    $Prompt$defaultText"
+
+    if ([string]::IsNullOrWhiteSpace($response)) {
+        if ($Default) { return $Default }
+        if ($Required) {
+            Write-Err "Value is required!"
+            exit 1
+        }
+        return ""
+    }
+    return $response
+}
+
+function Ask-Number {
+    param(
+        [string]$Prompt,
+        [int]$Default = 0,
+        [int]$Min = [int]::MinValue,
+        [int]$Max = [int]::MaxValue
+    )
+
+    $defaultText = if ($Default -ne 0) { " [$Default]" } else { "" }
+    $response = Read-Host "    $Prompt$defaultText"
+
+    if ([string]::IsNullOrWhiteSpace($response)) {
+        return $Default
+    }
+
+    $number = 0
+    if (-not [int]::TryParse($response, [ref]$number)) {
+        Write-Err "Invalid number: $response"
+        exit 1
+    }
+
+    if ($number -lt $Min -or $number -gt $Max) {
+        Write-Err "Number must be between $Min and $Max"
+        exit 1
+    }
+
+    return $number
+}
+
+function Ask-Path {
+    param(
+        [string]$Prompt,
+        [string]$Default = "",
+        [bool]$MustExist = $true
+    )
+
+    $path = Ask-String -Prompt $Prompt -Default $Default -Required $MustExist
+
+    if ([string]::IsNullOrWhiteSpace($path)) { return "" }
+
+    if (-not [System.IO.Path]::IsPathRooted($path)) {
+        $path = Join-Path $BaseDir $path
+    }
+
+    if ($MustExist -and -not (Test-Path $path)) {
+        Write-Err "Path does not exist: $path"
+        exit 1
+    }
+
+    return $path
+}
+
+# ============================================================================
+# Display Functions
 # ============================================================================
 
 function Show-List {
     Write-Host ""
     Write-Host "Installed Components:" -ForegroundColor Cyan
     Write-Host ""
-    
+
     $state = Load-State
-    
+
     foreach ($item in $AllPackages) {
         $name = $item.Name
         $pkgState = if ($state.packages.ContainsKey($name)) { $state.packages[$name] } else { $null }
-        
+
         if ($pkgState) {
             $status = if ($pkgState.installed) { "[installed]" } else { "[manual]" }
             $date = $pkgState.date
@@ -3199,11 +2948,8 @@ function Show-InstallComplete {
     Write-Host ""
 }
 
-
-
-# ──────────────────────────────────────────────────────────────────────────────
-# Source: inc/wizard.ps1
-# ──────────────────────────────────────────────────────────────────────────────
+# END core/ui.ps1
+# BEGIN core/wizard.ps1
 # ============================================================================
 # Project Configuration Wizard
 # ============================================================================
@@ -3261,64 +3007,670 @@ function Invoke-ConfigWizard {
     return $true
 }
 
+# END core/wizard.ps1
 
+# ============================================================================
+# EMBEDDED modules/box/*.ps1 (box commands)
+# ============================================================================
 
-# ══════════════════════════════════════════════════════════════════════════════
-# END COMPILED MODULES
-# ══════════════════════════════════════════════════════════════════════════════
+# BEGIN modules/box/clean.ps1
+# ============================================================================
+# Box Clean Module
+# ============================================================================
+#
+# Handles box clean command - cleaning build artifacts
 
+function Invoke-Box-Clean {
+    <#
+    .SYNOPSIS
+    Cleans build artifacts from the project.
 
-# Main Application (source: app.ps1)
-$script:SkipExecution = $false
+    .EXAMPLE
+    box clean
+    #>
 
+    Write-Title "Cleaning Build Artifacts"
 
-# Exit early if init signals to skip
-if ($SkipExecution) {
-    exit 0
+    # Clean common build directories
+    $cleanDirs = @('build', 'dist', 'out', 'bin', 'obj')
+
+    foreach ($dir in $cleanDirs) {
+        $dirPath = Join-Path $BaseDir $dir
+        if (Test-Path $dirPath) {
+            Remove-Item $dirPath -Recurse -Force -ErrorAction SilentlyContinue
+            Write-Success "Removed: $dir/"
+        }
+    }
+
+    # Clean temp files
+    Get-ChildItem -Path $BaseDir -Filter "*.tmp" -Recurse | Remove-Item -Force -ErrorAction SilentlyContinue
+    Get-ChildItem -Path $BaseDir -Filter "*.log" -Recurse | Remove-Item -Force -ErrorAction SilentlyContinue
+
+    Write-Success "Clean complete"
 }
 
+# END modules/box/clean.ps1
+# BEGIN modules/box/env.ps1
 # ============================================================================
-# Main
+# Box Env Module
 # ============================================================================
+#
+# Handles box env command - environment variable management
+
+function Invoke-Box-Env {
+    <#
+    .SYNOPSIS
+    Manages environment variables for the project.
+
+    .PARAMETER Sub
+    Subcommand: list, update
+
+    .EXAMPLE
+    box env list
+    box env update
+    #>
+    param(
+        [string]$Sub = "list"
+    )
+
+    switch ($Sub) {
+        "list" {
+            Show-EnvList
+        }
+        "update" {
+            Generate-AllEnvFiles
+            Write-Success ".env updated"
+        }
+        default {
+            Write-Err "Unknown env subcommand: $Sub"
+            Write-Info "Use: list, update"
+        }
+    }
+}
+
+function Show-EnvList {
+    <#
+    .SYNOPSIS
+    Displays all environment variables configured for the project.
+    #>
+    Write-Host ""
+    Write-Host "Environment Variables:" -ForegroundColor Cyan
+    Write-Host ""
+
+    $state = Load-State
+    if ($state.packages) {
+        foreach ($pkgName in $state.packages.Keys) {
+            $pkg = $state.packages[$pkgName]
+            if ($pkg.envs) {
+                Write-Host "  $pkgName" -ForegroundColor White
+                foreach ($envName in $pkg.envs.Keys) {
+                    $envValue = $pkg.envs[$envName]
+                    Write-Host ("    {0,-20} = {1}" -f $envName, $envValue) -ForegroundColor Gray
+                }
+            }
+        }
+    } else {
+        Write-Info "No packages installed yet"
+    }
+
+    Write-Host ""
+}
+
+# END modules/box/env.ps1
+# BEGIN modules/box/install.ps1
+# ============================================================================
+# Box Install Module
+# ============================================================================
+#
+# Handles box install command - installing packages in a project
+
+function Invoke-Box-Install {
+    <#
+    .SYNOPSIS
+    Installs all configured packages for the project.
+
+    .EXAMPLE
+    box install
+    #>
+
+    Write-Title "$($Config.Project.Name) Setup"
+
+    # Run config wizard if needed
+    if ($NeedsWizard) {
+        if (-not (Invoke-ConfigWizard)) {
+            return
+        }
+    }
+
+    # Create directories
+    Create-Directories
+
+    # Ensure 7-Zip is available
+    Ensure-SevenZip
+
+    # Install all packages
+    foreach ($pkg in $AllPackages) {
+        try {
+            Process-Package $pkg
+        } catch {
+            Write-Err "Failed to process $($pkg.Name): $_"
+            Write-Info "Continuing with remaining packages..."
+        }
+    }
+
+    # Cleanup
+    Cleanup-Temp
+
+    # Generate Makefile if box-specific
+    if (Get-Command Setup-Makefile -ErrorAction SilentlyContinue) {
+        Setup-Makefile
+    }
+
+    # Generate env files
+    Generate-AllEnvFiles
+
+    Show-InstallComplete
+}
+
+# END modules/box/install.ps1
+# BEGIN modules/box/status.ps1
+# ============================================================================
+# Box Status Module
+# ============================================================================
+#
+# Handles box status command - showing project status
+
+function Invoke-Box-Status {
+    <#
+    .SYNOPSIS
+    Displays project status and configuration.
+
+    .EXAMPLE
+    box status
+    #>
+
+    Write-Host ""
+    Write-Host "Project Status" -ForegroundColor Cyan
+    Write-Host ("=" * 60) -ForegroundColor DarkGray
+    Write-Host ""
+
+    # Project info
+    if ($Config.Project) {
+        Write-Host "Project:" -ForegroundColor White
+        Write-Host ("  Name:        {0}" -f $Config.Project.Name) -ForegroundColor Gray
+        Write-Host ("  Description: {0}" -f $Config.Project.Description) -ForegroundColor Gray
+        Write-Host ("  Version:     {0}" -f $Config.Project.Version) -ForegroundColor Gray
+        Write-Host ""
+    }
+
+    # Packages status
+    $state = Load-State
+    $installedCount = 0
+    $manualCount = 0
+
+    if ($state.packages) {
+        foreach ($pkgName in $state.packages.Keys) {
+            $pkg = $state.packages[$pkgName]
+            if ($pkg.installed) {
+                $installedCount++
+            } else {
+                $manualCount++
+            }
+        }
+    }
+
+    Write-Host "Packages:" -ForegroundColor White
+    Write-Host ("  Installed:   {0}" -f $installedCount) -ForegroundColor Green
+    Write-Host ("  Manual:      {0}" -f $manualCount) -ForegroundColor Yellow
+    Write-Host ("  Total:       {0}" -f ($installedCount + $manualCount)) -ForegroundColor Gray
+    Write-Host ""
+
+    # Directories
+    Write-Host "Directories:" -ForegroundColor White
+    Write-Host ("  Base:        {0}" -f $BaseDir) -ForegroundColor Gray
+    Write-Host ("  Vendor:      {0}" -f $VendorDir) -ForegroundColor Gray
+    Write-Host ("  Temp:        {0}" -f $TempDir) -ForegroundColor Gray
+    Write-Host ""
+}
+
+# END modules/box/status.ps1
+# BEGIN modules/box/uninstall.ps1
+# ============================================================================
+# Box Uninstall Module
+# ============================================================================
+#
+# Handles box uninstall command - removing installed packages
+
+function Invoke-Box-Uninstall {
+    <#
+    .SYNOPSIS
+    Uninstalls all packages from the project.
+
+    .EXAMPLE
+    box uninstall
+    #>
+
+    Write-Title "Uninstall Environment"
+
+    # Check for custom uninstall script
+    $uninstallScript = Join-Path $BoxDir "uninstall.ps1"
+    if (Test-Path $uninstallScript) {
+        & $uninstallScript
+    } else {
+        # Default uninstall: remove all package files
+        $state = Load-State
+        if ($state.packages) {
+            foreach ($pkgName in $state.packages.Keys) {
+                Write-Step "Removing $pkgName"
+                Remove-Package -Name $pkgName
+            }
+        }
+
+        # Remove vendor directory
+        if (Test-Path $VendorDir) {
+            Remove-Item $VendorDir -Recurse -Force -ErrorAction SilentlyContinue
+            Write-Success "Removed vendor directory"
+        }
+
+        # Remove state file
+        if (Test-Path $StateFile) {
+            Remove-Item $StateFile -Force -ErrorAction SilentlyContinue
+            Write-Success "Removed state file"
+        }
+
+        Write-Success "Uninstall complete"
+    }
+}
+
+# END modules/box/uninstall.ps1
+
+# ============================================================================
+# EMBEDDED modules/shared/pkg/*.ps1 (pkg module)
+# ============================================================================
+
+# BEGIN modules/shared/pkg/dependencies.ps1
+# ============================================================================
+# Package Dependency Validation Module
+# ============================================================================
+#
+# Functions for validating package dependencies and manual configuration.
+
+function Validate-PackageDependencies {
+    <#
+    .SYNOPSIS
+    Validates that required environment variables exist when package installation is refused.
+
+    .DESCRIPTION
+    When user chooses not to install a package, this function:
+    1. Extracts required env vars from Extract rules
+    2. Checks if env vars already exist
+    3. Prompts for manual paths if missing
+    4. Validates paths with Test-Path
+    5. Saves to .env file
+
+    .PARAMETER Package
+    Hashtable with package definition including Extract rules
+
+    .OUTPUTS
+    Hashtable of environment variable names and paths
+    #>
+    param([hashtable]$Package)
+
+    # Extract required env vars from Extract rules
+    $requiredEnvs = @()
+    if ($Package.Extract) {
+        foreach ($rule in $Package.Extract) {
+            if ($rule -match ':([A-Z_]+)$') {
+                $requiredEnvs += $Matches[1]
+            }
+        }
+    }
+
+    if ($requiredEnvs.Count -eq 0) {
+        return @{}
+    }
+
+    $envPaths = @{}
+
+    foreach ($envVar in $requiredEnvs) {
+        # Check if already set
+        $existingValue = [System.Environment]::GetEnvironmentVariable($envVar)
+        if ($existingValue) {
+            $envPaths[$envVar] = $existingValue
+            Write-Info "$envVar already set to: $existingValue"
+            continue
+        }
+
+        # Prompt for manual path
+        Write-Warn "$envVar is required for compilation/build"
+
+        while ($true) {
+            $manualPath = Read-Host "Enter path for $envVar (or 'skip' to abort)"
+
+            if ($manualPath -eq 'skip' -or [string]::IsNullOrWhiteSpace($manualPath)) {
+                Write-Err "Missing required dependency: $envVar"
+                throw "Cannot proceed without $envVar"
+            }
+
+            # Validate path
+            if (Test-Path $manualPath) {
+                $envPaths[$envVar] = $manualPath
+
+                # Save to .env
+                $envFilePath = Join-Path $ProjectRoot ".env"
+                Add-Content -Path $envFilePath -Value "$envVar=$manualPath"
+
+                # Set in current session
+                [System.Environment]::SetEnvironmentVariable($envVar, $manualPath)
+
+                Write-Success "Set $envVar=$manualPath"
+                break
+            } else {
+                Write-Warn "Path not found: $manualPath"
+                Write-Info "Please provide a valid path or type 'skip' to abort"
+            }
+        }
+    }
+
+    return $envPaths
+}
+
+# END modules/shared/pkg/dependencies.ps1
+# BEGIN modules/shared/pkg/install.ps1
+# ============================================================================
+# Package Installation Module
+# ============================================================================
+#
+# Main package installation logic with user interaction and state management.
+
+function Process-Package {
+    <#
+    .SYNOPSIS
+    Processes a package installation with user interaction.
+
+    .DESCRIPTION
+    Handles the complete package installation workflow:
+    - Checks if package already installed (system/vendor/env)
+    - Prompts user for installation decisions
+    - Downloads and extracts package
+    - Updates package state
+    - Handles manual configuration if user refuses install
+
+    .PARAMETER Item
+    Hashtable with package definition (Name, Url, File, Archive, Extract, Mode, etc.)
+
+    .EXAMPLE
+    Process-Package -Item $packageDef
+    #>
+    param([hashtable]$Item)
+
+    $name = $Item.Name
+    $mode = if ($Item.Mode) { $Item.Mode } else { "auto" }
+    $pkgState = Get-PackageState $name
+    $isInstalled = $pkgState -and $pkgState.installed
+    $isManual = $pkgState -and -not $pkgState.installed
+    $existingEnvs = if ($pkgState -and $pkgState.envs) { $pkgState.envs } else { @{} }
+
+    Write-Step "$name - $($Item.Description)"
+
+    # Check if package already installed via system/vendor/env
+    $detection = Test-PackageInstalled -Package $Item
+
+    # Skip the "install anyway?" prompt for local installations (state/vendor source)
+    # Go directly to the "Local installation found" prompt instead
+    if ($detection.Installed -and $detection.Source -notin @("state", "vendor")) {
+        # Prompt user to use existing installation (global/system only)
+        $sourceLabel = if ($detection.Source -eq "env") { "global" } elseif ($detection.Source -eq "command") { "system" } else { $detection.Source }
+        Write-Info "Found $sourceLabel installation: $($detection.Path)"
+        $useExisting = Ask-Choice "Install locally in project anyway? [y/N]"
+
+        if ($useExisting -ne "Y") {
+            Write-Success "Using $sourceLabel $name"
+            # Don't save any state - we're just using the existing installation
+            # The detection will find it again next time
+            return
+        }
+        # User chose to install anyway, continue below
+    }
+
+    # Already installed -> ask: Keep, Reinstall, Manual
+    if ($isInstalled) {
+        $choice = Ask-Choice "Local installation found. [K]eep / [R]einstall / [M]anual?"
+
+        switch ($choice) {
+            "K" {
+                Write-Info "Keeping existing local installation"
+                return
+            }
+            "R" {
+                Write-Info "Removing previous installation..."
+                Remove-Package $name
+                # Continue to install below
+            }
+            "M" {
+                $envs = Ask-ManualEnvs -ExtractRules $Item.Extract -ExistingEnvs $existingEnvs
+                Set-PackageState -Name $name -Installed $false -Files @() -Dirs @() -Envs $envs
+                Write-Success "Manual paths configured"
+                return
+            }
+        }
+    }
+    # Manual config exists -> ask: Skip, Install, Reconfigure
+    elseif ($isManual) {
+        $choice = Ask-Choice "$name has manual config. [S]kip / [I]nstall / [R]econfigure?"
+
+        switch ($choice) {
+            "S" {
+                Write-Info "Skipped"
+                return
+            }
+            "I" {
+                # Continue to install below
+            }
+            "R" {
+                $envs = Ask-ManualEnvs -ExtractRules $Item.Extract -ExistingEnvs $existingEnvs
+                Set-PackageState -Name $name -Installed $false -Files @() -Dirs @() -Envs $envs
+                Write-Success "Manual paths reconfigured"
+                return
+            }
+        }
+    }
+    # Not installed -> ask if mode=ask, otherwise auto-install
+    else {
+        if ($mode -eq "ask") {
+            $choice = Ask-Choice "Install? [Y/n]"
+
+            if ($choice -eq "N") {
+                # User refused install, validate dependencies
+                try {
+                    $envs = Validate-PackageDependencies -Package $Item
+                    Set-PackageState -Name $name -Installed $false -Files @() -Dirs @() -Envs $envs
+                    Write-Success "Manual paths configured"
+                } catch {
+                    Write-Err "Dependency validation failed: $_"
+                }
+                return
+            }
+        }
+        # mode=auto or user said Yes -> continue to install
+    }
+
+    # Detect SourceType
+    $sourceType = if ($Item.SourceType) { $Item.SourceType } else { "http" }
+
+    # Download and install
+    $archive = Download-File -Url $Item.Url -FileName $Item.File -SourceType $sourceType
+
+    if (-not $archive) {
+        Write-Err "Download failed for $name"
+        return
+    }
+
+    if ($Item.Archive -eq "file") {
+        $result = Install-SingleFile -FilePath $archive -Name $name -ExtractRules $Item.Extract
+    } else {
+        $result = Extract-Package -Archive $archive -Name $name -ArchiveType $Item.Archive -ExtractRules $Item.Extract
+    }
+
+    Set-PackageState -Name $name -Installed $true -Files $result.Files -Dirs $result.Dirs -Envs $result.Envs
+    Write-Success "Installed"
+}
+
+# END modules/shared/pkg/install.ps1
+# BEGIN modules/shared/pkg/list.ps1
+# ============================================================================
+# Package List Module
+# ============================================================================
+#
+# Functions for displaying package information.
+
+function Show-PackageList {
+    <#
+    .SYNOPSIS
+    Displays a formatted list of all packages with their status.
+
+    .DESCRIPTION
+    Shows a table with package names, environment variables, descriptions,
+    and installation status with visual indicators.
+
+    .EXAMPLE
+    Show-PackageList
+    #>
+    Write-Host ""
+    Write-Host "Packages:" -ForegroundColor Cyan
+    Write-Host ""
+
+    $state = Load-State
+
+    # Table columns
+    $colName = 20
+    $colEnv = 18
+    $colValue = 35
+    $colStatus = 9
+
+    Write-Host ("  {0,-$colName} {1,-$colEnv} {2,-$colValue} {3}" -f "NAME", "ENV VARS", "DESCRIPTION", "INSTALLED") -ForegroundColor DarkGray
+    Write-Host ("  {0,-$colName} {1,-$colEnv} {2,-$colValue} {3}" -f ("-" * $colName), ("-" * $colEnv), ("-" * $colValue), ("-" * $colStatus)) -ForegroundColor DarkGray
+
+    foreach ($item in $AllPackages) {
+        $name = $item.Name
+        $pkgState = if ($state.packages.ContainsKey($name)) { $state.packages[$name] } else { $null }
+
+        # Get ENV vars (from state if installed, from rules if not)
+        $envVars = @{}
+        if ($pkgState -and $pkgState.envs) {
+            $envVars = $pkgState.envs
+        } elseif ($item.Extract) {
+            foreach ($rule in $item.Extract) {
+                $parsed = Parse-ExtractRule $rule
+                if ($parsed -and $parsed.EnvVar) {
+                    $envVars[$parsed.EnvVar] = $null
+                }
+            }
+        }
+
+        # Status indicator (last column)
+        $isInstalled = $pkgState -and $pkgState.installed
+        $isManual = $pkgState -and -not $pkgState.installed
+        $hasEnvVars = $envVars.Count -gt 0
+        $statusMark = if ($isInstalled) { [char]0x1F60A } elseif ($isManual) { [char]0x1F4E6 } else { "" }
+        $statusColor = if ($isInstalled) { "Green" } elseif ($isManual) { "Yellow" } else { "DarkGray" }
+
+        # First line: package name + first ENV or description
+        $firstEnv = $envVars.Keys | Select-Object -First 1
+
+        Write-Host ("  {0,-$colName}" -f $name) -ForegroundColor White -NoNewline
+
+        if ($firstEnv) {
+            $firstValue = if ($envVars[$firstEnv]) { $envVars[$firstEnv] } else { $item.Description }
+            $valueColor = if ($envVars[$firstEnv]) { "Gray" } else { "DarkGray" }
+            Write-Host (" {0,-$colEnv}" -f $firstEnv) -ForegroundColor Cyan -NoNewline
+            Write-Host (" {0,-$colValue}" -f $firstValue) -ForegroundColor $valueColor -NoNewline
+        } else {
+            Write-Host (" {0,-$colEnv} {1,-$colValue}" -f "", $item.Description) -ForegroundColor DarkGray -NoNewline
+        }
+        Write-Host $statusMark -ForegroundColor $statusColor
+
+        # Additional ENV vars (skip first)
+        $remaining = $envVars.Keys | Select-Object -Skip 1
+        foreach ($envName in $remaining) {
+            $envValue = if ($envVars[$envName]) { $envVars[$envName] } else { $item.Description }
+            $valueColor = if ($envVars[$envName]) { "Gray" } else { "DarkGray" }
+
+            Write-Host ("  {0,-$colName}" -f "") -NoNewline
+            Write-Host (" {0,-$colEnv}" -f $envName) -ForegroundColor Cyan -NoNewline
+            Write-Host (" {0,-$colValue}" -f $envValue) -ForegroundColor $valueColor
+        }
+    }
+
+    Write-Host ""
+}
+
+# END modules/shared/pkg/list.ps1
+# BEGIN modules/shared/pkg/uninstall.ps1
+# ============================================================================
+# Package Uninstallation Module
+# ============================================================================
+#
+# Functions for removing installed packages.
+
+function Remove-Package {
+    <#
+    .SYNOPSIS
+    Removes an installed package.
+
+    .DESCRIPTION
+    Deletes all files and directories installed by the package,
+    then removes the package state.
+
+    .PARAMETER Name
+    The package name
+
+    .EXAMPLE
+    Remove-Package -Name "vbcc"
+    #>
+    param([string]$Name)
+
+    $pkgState = Get-PackageState $Name
+    if (-not $pkgState) {
+        Write-Warn "Package $Name not found in state"
+        return
+    }
+
+    if ($pkgState.installed -and $pkgState.files) {
+        Write-Info "Removing $($pkgState.files.Count) files and $($pkgState.dirs.Count) directories..."
+
+        foreach ($file in $pkgState.files) {
+            if (Test-Path $file) {
+                Remove-Item $file -Recurse -Force -ErrorAction SilentlyContinue
+                Write-Info "Removed: $file"
+            }
+        }
+    }
+
+    Remove-PackageState $Name
+    Write-Success "Package $Name removed"
+}
+
+# END modules/shared/pkg/uninstall.ps1
+
+# ============================================================================
+# MAIN - Command dispatcher
+# ============================================================================
+
+if (-not $Command) {
+    $Command = "install"
+}
 
 switch ($Command) {
-    "init" {
-        Invoke-Init
-    }
-    "install" {
-        Invoke-Install
-    }
-    "uninstall" {
-        Invoke-Uninstall
-    }
-    "env" {
-        if ([string]::IsNullOrEmpty($SubCommand)) {
-            Show-EnvList
-        } else {
-            Invoke-Env -Sub $SubCommand -Params $Args
-        }
-    }
-    "pkg" {
-        if ([string]::IsNullOrEmpty($SubCommand)) {
-            Show-PackageList
-        } else {
-            Invoke-Pkg -Sub $SubCommand
-        }
-    }
-    "template" {
-        if ($SubCommand -eq "apply") {
-            if ($Args.Count -eq 0) {
-                Write-Host "Error: template name required" -ForegroundColor Red
-                Write-Host "Usage: box template apply <name>" -ForegroundColor Yellow
-                exit 1
-            }
-            Invoke-TemplateApply -Template $Args[0]
-        }
-        else {
-            Invoke-EnvUpdate
-        }
-    }
+    "install" { Invoke-Box-Install }
+    "uninstall" { Invoke-Box-Uninstall }
+    "env" { Invoke-Box-Env -Sub ($Arguments[0]) }
+    "clean" { Invoke-Box-Clean }
+    "status" { Invoke-Box-Status }
     default {
-        Invoke-Install
+        Write-Host "Unknown command: $Command" -ForegroundColor Red
+        Write-Host "Available: install, uninstall, env, clean, status" -ForegroundColor Gray
+        exit 1
     }
 }
+

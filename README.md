@@ -1,112 +1,72 @@
-# AmigaDevBox
+# AmiDevBox
 
-Complete Amiga OS development kit setup for cross-compilation on Windows with VBCC.
+Amiga development environment with VBCC compiler, NDK 3.9, and build tools.
 
-## 🚀 Quick Start
+## Type
+
+**dev** - Complete Amiga 68k development environment
+
+## Features
+
+- VBCC compiler for AmigaOS 68k
+- NDK 3.9 (Native Development Kit)
+- ApolloExplorer (acp upload tool)
+- Build system (Makefile for VBCC)
+- Remote debugging support (bgdbserver)
+- LHA archiver support
+
+## Installation
 
 ```powershell
-# Install DevBox globally (one-time setup)
-irm https://github.com/vbuzzano/AmiDevBox/raw/main/devbox.ps1 | iex
+boxer install AmiDevBox
+```
 
-# Create and setup your project
-devbox init MyProject
-cd MyProject
+## Usage
+
+Initialize Amiga project:
+```powershell
+cd your-amiga-project
 box install
+```
 
-# Build your project
+Build:
+```bash
 make
 ```
 
-## 📦 What Is It
-
-- **Automate Projects** - Reproducible development environment setup
-- **Easy Recreation** - Share and recreate projects effortlessly
-- **Compiler Ready** - Auto-installs VBCC (more compilers coming soon)
-- **Complete Toolchain** - Downloads NDK headers and libraries automatically
-- **Zero Config** - Pre-configured Makefiles and build system ready to use
-
-## 🛠️ Commands
-
-```powershell
-# Project setup
-box install                # Install all packages
-box uninstall              # Remove packages
-
-# Environment
-box env list               # Show environment variables
-box env set KEY VAL        # Set environment variable
-
-# Package management
-box pkg list               # List installed packages
-box pkg info NAME          # Show package details
-
-# Help
-box help                   # Show all available commands
+Upload to Vampire/Apollo:
+```bash
+make upload
 ```
 
-## 📚 Documentation
-
-- `.box/` - Core DevBox system
-- `.box/tpl/` - Project templates and Makefile examples
-- `.vscode/` - Pre-configured VS Code settings
-
-## 🔧 Configuration
-
-Edit `.box/config.psd1` to customize:
-- Package versions
-- Installation paths
-- Build environment variables
-
-## 🩹 Troubleshooting
-
-### DevBox Not Recognized
-
-If `devbox` command is not found after installation:
-
-```powershell
-# Reload your PowerShell profile
-. $PROFILE
-
-# Or restart PowerShell
+Clean:
+```bash
+make clean
 ```
 
-### Box Command Outside Project
+## Configuration
 
-If you get "No DevBox project found" error:
-- Ensure you are inside a DevBox project directory
-- Create a new project: `devbox init MyProject`
-- The `box` command searches parent directories for `.box/`
+Edit `config.psd1` to customize:
+- VBCC version and target
+- NDK version
+- Build directories
+- Additional packages
 
-### Installation Issues
+## Packages Included
 
-**Problem**: Script execution policy error
-```powershell
-# Solution: Enable script execution (one-time)
-Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
-```
+- **VBCC Compiler**: Cross-compiler for AmigaOS
+- **VBCC Target**: m68k-amigaos target
+- **NDK 3.9**: AmigaOS headers and libraries
+- **LHA**: Archive tool for .lha files
+- **ApolloExplorer**: Upload tool for Apollo/Vampire boards
+- **bgdbserver**: Remote debugger
 
-**Problem**: Profile corruption or duplicate entries
-- Check `$PROFILE.CurrentUserAllHosts` for multiple `#region devbox initialize` blocks
-- Remove duplicates, keeping only one block
-- Future: Use `devbox uninstall` (Feature 007)
+## Environment Variables
 
-**Problem**: Installation hangs or fails
-- Check internet connection for package downloads
-- Verify GitHub access (not blocked by firewall)
-- Try manual installation: Download `devbox.ps1` and run `.\devbox.ps1`
+- `VBCC`: Path to VBCC compiler
+- `NDK39`: Path to NDK 3.9
+- `ACP`: Path to acp.exe (upload tool)
+- `GDB`: Path to bgdbserver
+- `LHATOOL`: Path to lha tool
 
-## 📖 Resources
 
-- AmigaOS Documentation: [Amiga.org](https://www.amiga.org)
-- VBCC Compiler: [VBCC Homepage](http://www.compilers.de/vbcc.html)
-- NDK Resources: Various AmigaOS development resources
-
-## 📄 License
-
-See LICENSE file for details.
-
----
-
-**AmigaDevBox** - Making AmigaOS development accessible and simple.
-
-Built with ❤️ by Vincent Buzzano (ReddoC)
