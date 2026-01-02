@@ -6,7 +6,7 @@
     Standalone box.ps1 with embedded modules
 
 .NOTES
-    Build Date: 2026-01-02 16:48:43
+    Build Date: 2026-01-02 22:59:12
     Version: 1.0.0
 #>
 
