@@ -6,7 +6,7 @@
     Standalone boxer.ps1 with embedded modules
 
 .NOTES
-    Build Date: 2026-01-03 21:08:36
+    Build Date: 2026-01-03 21:14:28
     Version: 1.0.0
 #>
 
@@ -208,6 +208,17 @@ function Initialize-Boxing {
         if ($Arguments.Count -gt 0) {
             $command = $Arguments[0]
             $cmdArgs = $Arguments[1..($Arguments.Count - 1)]
+
+            # Special case: --install flag for boxing system setup
+            if ($command -eq '--install' -and $mode -eq 'boxer') {
+                if (Get-Command Install-BoxingSystem -ErrorAction SilentlyContinue) {
+                    Install-BoxingSystem
+                    return 0
+                } else {
+                    Write-Error "Install-BoxingSystem function not found"
+                    return 1
+                }
+            }
 
             return Invoke-Command -CommandName $command -Arguments $cmdArgs
         }
