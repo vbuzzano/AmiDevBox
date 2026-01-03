@@ -6,7 +6,7 @@
     Standalone boxer.ps1 with embedded modules
 
 .NOTES
-    Build Date: 2025-12-31 22:11:26
+    Build Date: 2026-01-03 01:11:09
     Version: 1.0.0
 #>
 
@@ -223,7 +223,7 @@ function Initialize-Boxing {
 }
 
 # Export main entry point
-Export-ModuleMember -Function Initialize-Boxing
+# Export-ModuleMember removed (compiled script)
 
 # END boxing.ps1
 
@@ -2704,6 +2704,189 @@ function Invoke-BoxInit {
     }
 }
 
+# ============================================================================
+# TAGGED FILE UPDATE SYSTEM (with Hooks)
+# ============================================================================
+
+function Update-TaggedFiles {
+    <#
+    .SYNOPSIS
+        Updates tagged values in project files using environment variables.
+
+    .DESCRIPTION
+        Scans project files for tagged values and replaces them with current
+        environment variable values. Supports hook system for box-specific
+        replacement syntaxes.
+
+        Core syntaxes:
+        - ~value[VAR_NAME]~ : Universal tag (works in any text file)
+
+        Box-specific syntaxes can be added via hooks in:
+        boxers/<BoxName>/core/hooks.ps1
+
+    .PARAMETER Path
+        Path to file or directory to process. Defaults to current directory.
+
+    .PARAMETER Recurse
+        Process files recursively in subdirectories.
+
+    .PARAMETER ReleaseMode
+        If true, strips tags from output (for release builds).
+        If false, preserves tags for future updates.
+
+    .PARAMETER Variables
+        Hashtable of variables to use for replacement. If not provided,
+        loads from .env file.
+
+    .EXAMPLE
+        Update-TaggedFiles -Path "README.md"
+        Updates tagged values in README.md
+
+    .EXAMPLE
+        Update-TaggedFiles -Path "." -Recurse
+        Updates all tagged files in project recursively
+    #>
+    param(
+        [string]$Path = ".",
+        [switch]$Recurse,
+        [switch]$ReleaseMode,
+        [hashtable]$Variables = $null
+    )
+
+    # Load variables if not provided
+    if (-not $Variables) {
+        $Variables = Get-TemplateVariables
+        if ($Variables.Count -eq 0) {
+            Write-Verbose "No variables found in .env"
+            return
+        }
+    }
+
+    # Find files to process
+    $files = @()
+    if (Test-Path $Path -PathType Container) {
+        $files = Get-ChildItem -Path $Path -File -Recurse:$Recurse
+    } elseif (Test-Path $Path -PathType Leaf) {
+        $files = @(Get-Item $Path)
+    } else {
+        Write-Warn "Path not found: $Path"
+        return
+    }
+
+    if ($files.Count -eq 0) {
+        Write-Verbose "No files to process"
+        return
+    }
+
+    $processedCount = 0
+
+    foreach ($file in $files) {
+        # Skip binary files
+        if (-not (Test-TextFile $file.FullName)) {
+            continue
+        }
+
+        $text = Get-Content $file.FullName -Raw -Encoding UTF8
+        $originalText = $text
+
+        # Hook: Before replacement (box-specific syntaxes)
+        if (Get-Command "Hook-BeforeTemplateReplace" -ErrorAction SilentlyContinue) {
+            $text = Hook-BeforeTemplateReplace $text $Variables $ReleaseMode
+        }
+
+        # Core syntax: ~value[VAR_NAME]~
+        $text = Apply-TildeSyntax $text $Variables $ReleaseMode
+
+        # Hook: After replacement (box-specific post-processing)
+        if (Get-Command "Hook-AfterTemplateReplace" -ErrorAction SilentlyContinue) {
+            $text = Hook-AfterTemplateReplace $text $Variables $ReleaseMode
+        }
+
+        # Save if changed
+        if ($text -ne $originalText) {
+            Set-Content -Path $file.FullName -Value $text -Encoding UTF8 -NoNewline
+            Write-Verbose "Updated: $($file.Name)"
+            $processedCount++
+        }
+    }
+
+    if ($processedCount -gt 0) {
+        Write-Verbose "Updated $processedCount file(s)"
+    }
+}
+
+function Apply-TildeSyntax {
+    <#
+    .SYNOPSIS
+        Applies ~value[VAR]~ replacement syntax.
+
+    .DESCRIPTION
+        Replaces tagged values in format ~oldvalue[VAR_NAME]~
+
+        In-place mode: ~oldvalue[VAR]~ → ~newvalue[VAR]~ (preserves tags)
+        Release mode:  ~oldvalue[VAR]~ → newvalue (strips tags)
+    #>
+    param(
+        [string]$Text,
+        [hashtable]$Variables,
+        [bool]$ReleaseMode
+    )
+
+    $Text = [regex]::Replace($Text, '~([^\[~]*?)(\[[^\]]+\]~)', {
+        param($match)
+
+        $taggedVar = $match.Groups[2].Value  # [VAR_NAME]~
+        $varName = $taggedVar -replace '[\[\]~]', ''
+
+        # Find matching variable (case-insensitive)
+        $matchedKey = $Variables.Keys | Where-Object { $_ -ieq $varName } | Select-Object -First 1
+
+        if ($matchedKey) {
+            $newValue = $Variables[$matchedKey]
+
+            if ($ReleaseMode) {
+                # Release: strip tags completely
+                return $newValue
+            } else {
+                # In-place: preserve tags, update value
+                return "~$newValue$taggedVar"
+            }
+        }
+
+        return $match.Value
+    })
+
+    return $Text
+}
+
+function Test-TextFile {
+    <#
+    .SYNOPSIS
+        Tests if a file is a text file (not binary).
+    #>
+    param([string]$Path)
+
+    try {
+        $stream = [System.IO.File]::OpenRead($Path)
+        $buffer = New-Object byte[] 512
+        $read = $stream.Read($buffer, 0, 512)
+        $stream.Close()
+
+        $sample = [System.Text.Encoding]::UTF8.GetString($buffer, 0, $read)
+
+        # If contains null bytes or control chars (except CR/LF/TAB), it's binary
+        if ($sample -match "[\x00-\x08\x0B\x0E-\x1F]" -and $sample -notmatch "\r|\n|\t") {
+            return $false
+        }
+
+        return $true
+    }
+    catch {
+        return $false
+    }
+}
+
+
 # END core/templates.ps1
 # BEGIN core/ui.ps1
 # ============================================================================
@@ -3048,9 +3231,9 @@ function Invoke-Boxer-Init {
         }
 
         Write-Success "Project created: $SafeName"
-        Write-Info "Next steps:"
-        Write-Info "  cd $SafeName"
-        Write-Info "  box install"
+        Write-Host "  Next steps:" -ForegroundColor Cyan
+        Write-Host "    cd $SafeName" -ForegroundColor White
+        Write-Host "    box install" -ForegroundColor White
 
     } catch {
         Write-Err "Project creation failed: $_"
@@ -3060,7 +3243,257 @@ function Invoke-Boxer-Init {
     }
 }
 
+function Install-BoxingSystem {
+    <#
+    .SYNOPSIS
+    Installs Boxing system globally (boxer.ps1 and box.ps1).
+
+    .DESCRIPTION
+    Sets up Boxing for global use by:
+    - Creating Scripts directory in PowerShell folder
+    - Copying boxer.ps1 and box.ps1 to Scripts
+    - Creating Boxing directory for box storage
+    - Modifying PowerShell profile with boxer and box functions
+    - Avoiding duplication if already installed
+
+    .EXAMPLE
+    Install-BoxingSystem
+    #>
+
+    Write-Step "Installing Boxing system globally..."
+
+    try {
+        # Paths
+        $ScriptsDir = "$env:USERPROFILE\Documents\PowerShell\Scripts"
+        $BoxingDir = "$env:USERPROFILE\Documents\PowerShell\Boxing"
+        $ProfilePath = $PROFILE.CurrentUserAllHosts
+
+        # Create Scripts directory
+        if (-not (Test-Path $ScriptsDir)) {
+            Write-Step "Creating Scripts directory..."
+            New-Item -ItemType Directory -Path $ScriptsDir -Force | Out-Null
+            Write-Success "Created: $ScriptsDir"
+        }
+
+        # Create Boxing directory
+        if (-not (Test-Path $BoxingDir)) {
+            Write-Step "Creating Boxing directory..."
+            New-Item -ItemType Directory -Path $BoxingDir -Force | Out-Null
+            Write-Success "Created: $BoxingDir"
+        }
+
+        # Copy boxer.ps1
+        $BoxerSource = Join-Path $PSScriptRoot "../../dist/boxer.ps1"
+        $BoxerDest = Join-Path $ScriptsDir "boxer.ps1"
+        if (Test-Path $BoxerSource) {
+            Copy-Item -Force $BoxerSource $BoxerDest
+            Write-Success "Installed: boxer.ps1"
+        } else {
+            # If running from install.ps1 context, use current script
+            Copy-Item -Force $PSCommandPath $BoxerDest
+            Write-Success "Installed: boxer.ps1"
+        }
+
+        # Copy box.ps1
+        $BoxSource = Join-Path $PSScriptRoot "../../dist/box.ps1"
+        $BoxDest = Join-Path $ScriptsDir "box.ps1"
+        if (Test-Path $BoxSource) {
+            Copy-Item -Force $BoxSource $BoxDest
+            Write-Success "Installed: box.ps1"
+        }
+
+        # Modify PowerShell profile
+        Write-Step "Configuring PowerShell profile..."
+
+        # Create profile directory if needed
+        $ProfileDir = Split-Path $ProfilePath -Parent
+        if (-not (Test-Path $ProfileDir)) {
+            New-Item -ItemType Directory -Path $ProfileDir -Force | Out-Null
+        }
+
+        # Read existing profile or create empty
+        $ProfileContent = ""
+        if (Test-Path $ProfilePath) {
+            $ProfileContent = Get-Content $ProfilePath -Raw
+        }
+
+        # Check if #region boxing already exists
+        if ($ProfileContent -match '#region boxing') {
+            Write-Success "Profile already configured (skipping)"
+        } else {
+            # Add Boxing region to profile
+            $BoxingRegion = @"
+
+#region boxing
+function boxer {
+    `$boxerPath = "`$env:USERPROFILE\Documents\PowerShell\Scripts\boxer.ps1"
+    if (Test-Path `$boxerPath) {
+        . `$boxerPath @args
+    } else {
+        Write-Host "Error: boxer.ps1 not found at `$boxerPath" -ForegroundColor Red
+    }
+}
+
+function box {
+    `$boxPath = "`$env:USERPROFILE\Documents\PowerShell\Scripts\box.ps1"
+    if (Test-Path `$boxPath) {
+        . `$boxPath @args
+    } else {
+        Write-Host "Error: box.ps1 not found at `$boxPath" -ForegroundColor Red
+    }
+}
+#endregion boxing
+"@
+
+            # Append to profile
+            $ProfileContent += $BoxingRegion
+            Set-Content -Path $ProfilePath -Value $ProfileContent -Encoding UTF8
+            Write-Success "Profile configured with boxer and box functions"
+        }
+
+        Write-Success "Boxing system installed successfully!"
+        Write-Host ""
+        Write-Host "  Next steps:" -ForegroundColor Cyan
+        Write-Host "    1. Restart PowerShell" -ForegroundColor White
+        Write-Host "    2. Run: boxer init MyProject" -ForegroundColor White
+
+    } catch {
+        Write-Error-Custom "Installation failed: $_"
+        throw
+    }
+}
+
+
 # END modules/boxer/init.ps1
+# BEGIN modules/boxer/install.ps1
+# ============================================================================
+# Boxer Install Module
+# ============================================================================
+#
+# Handles boxer install command - installing boxes from GitHub URLs
+
+function Install-Box {
+    <#
+    .SYNOPSIS
+    Installs a box from a GitHub URL.
+
+    .PARAMETER BoxUrl
+    GitHub repository URL (e.g., https://github.com/user/BoxName)
+
+    .EXAMPLE
+    boxer install https://github.com/vbuzzano/AmiDevBox
+    #>
+    param(
+        [Parameter(Mandatory=$true)]
+        [string]$BoxUrl
+    )
+
+    Write-Step "Installing box from $BoxUrl..."
+
+    try {
+        # Parse GitHub URL to extract owner, repo, branch
+        if ($BoxUrl -match 'github\.com[:/](?<owner>[^/]+)/(?<repo>[^/]+?)(?:\.git)?$') {
+            $Owner = $Matches['owner']
+            $Repo = $Matches['repo']
+            $BoxName = $Repo
+        } else {
+            throw "Invalid GitHub URL format. Expected: https://github.com/user/repo"
+        }
+
+        Write-Step "Box name: $BoxName"
+
+        # Target directory
+        $BoxingDir = "$env:USERPROFILE\Documents\PowerShell\Boxing"
+        $BoxDir = Join-Path $BoxingDir $BoxName
+
+        # Check if box already installed
+        if (Test-Path $BoxDir) {
+            Write-Error-Custom "Box '$BoxName' is already installed at $BoxDir"
+            return
+        }
+
+        # Create box directory
+        New-Item -ItemType Directory -Path $BoxDir -Force | Out-Null
+        Write-Success "Created: $BoxDir"
+
+        # Download config.psd1
+        Write-Step "Downloading config.psd1..."
+        $ConfigUrl = "https://github.com/$Owner/$Repo/raw/main/config.psd1"
+        $ConfigPath = Join-Path $BoxDir "config.psd1"
+        try {
+            Invoke-RestMethod -Uri $ConfigUrl -OutFile $ConfigPath
+            Write-Success "Downloaded: config.psd1"
+        } catch {
+            Write-Host "  Warning: config.psd1 not found (optional)" -ForegroundColor Yellow
+        }
+
+        # Download metadata.psd1
+        Write-Step "Downloading metadata.psd1..."
+        $MetadataUrl = "https://github.com/$Owner/$Repo/raw/main/metadata.psd1"
+        $MetadataPath = Join-Path $BoxDir "metadata.psd1"
+        try {
+            Invoke-RestMethod -Uri $MetadataUrl -OutFile $MetadataPath
+            Write-Success "Downloaded: metadata.psd1"
+        } catch {
+            Write-Host "  Warning: metadata.psd1 not found (optional)" -ForegroundColor Yellow
+        }
+
+        # Download tpl/ directory (recursive)
+        Write-Step "Downloading templates..."
+        $TplDir = Join-Path $BoxDir "tpl"
+        New-Item -ItemType Directory -Path $TplDir -Force | Out-Null
+        
+        # Use GitHub API to list files in tpl/
+        $ApiUrl = "https://api.github.com/repos/$Owner/$Repo/contents/tpl"
+        try {
+            $TplFiles = Invoke-RestMethod -Uri $ApiUrl
+            foreach ($File in $TplFiles) {
+                if ($File.type -eq 'file') {
+                    $FilePath = Join-Path $TplDir $File.name
+                    Invoke-RestMethod -Uri $File.download_url -OutFile $FilePath
+                    Write-Success "Downloaded: tpl/$($File.name)"
+                }
+            }
+        } catch {
+            Write-Host "  Warning: tpl/ directory not found or empty" -ForegroundColor Yellow
+        }
+
+        # Copy box.ps1 from dist
+        $BoxSource = Join-Path $PSScriptRoot "../../dist/box.ps1"
+        if (Test-Path $BoxSource) {
+            $BoxDest = Join-Path $BoxDir "box.ps1"
+            Copy-Item -Force $BoxSource $BoxDest
+            Write-Success "Copied: box.ps1"
+        }
+
+        # Create .boxer manifest
+        Write-Step "Creating manifest..."
+        $ManifestPath = Join-Path $BoxDir ".boxer"
+        $ManifestContent = @"
+Name=$BoxName
+Version=0.1.0
+Repository=$BoxUrl
+"@
+        Set-Content -Path $ManifestPath -Value $ManifestContent -Encoding UTF8
+        Write-Success "Created: .boxer manifest"
+
+        Write-Success "Box '$BoxName' installed successfully!"
+        Write-Host ""
+        Write-Host "  Next steps:" -ForegroundColor Cyan
+        Write-Host "    boxer init MyProject" -ForegroundColor White
+
+    } catch {
+        Write-Error-Custom "Box installation failed: $_"
+        
+        # Cleanup on error
+        if (Test-Path $BoxDir) {
+            Remove-Item -Path $BoxDir -Recurse -Force -ErrorAction SilentlyContinue
+        }
+        throw
+    }
+}
+
+# END modules/boxer/install.ps1
 # BEGIN modules/boxer/list.ps1
 # ============================================================================
 # Boxer List Module
