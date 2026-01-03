@@ -24,10 +24,9 @@ Write-Host ""
 try {
     $BoxingScriptsDir = "$env:USERPROFILE\Documents\PowerShell\Scripts"
     $BoxerPath = Join-Path $BoxingScriptsDir "boxer.ps1"
-    $BoxPath = Join-Path $BoxingScriptsDir "box.ps1"
 
-    # Check if Boxing is already installed
-    $boxingInstalled = (Test-Path $BoxerPath) -and (Test-Path $BoxPath)
+    # Check if Boxing is already installed (only boxer.ps1 needed, box is a shell function)
+    $boxingInstalled = Test-Path $BoxerPath
 
     if (-not $boxingInstalled) {
         Write-Host "📦 Boxing system not found. Installing..." -ForegroundColor Yellow
@@ -43,13 +42,6 @@ try {
         $boxerUrl = "https://github.com/vbuzzano/AmiDevBox/raw/main/boxer.ps1"
         Invoke-RestMethod -Uri $boxerUrl -OutFile $BoxerPath
         Write-Host "   ✓ Downloaded boxer.ps1" -ForegroundColor Green
-        Write-Host ""
-
-        # Download box.ps1 from box repo
-        Write-Host "📥 Downloading box.ps1..." -ForegroundColor Yellow
-        $boxUrl = "https://github.com/vbuzzano/AmiDevBox/raw/main/box.ps1"
-        Invoke-RestMethod -Uri $boxUrl -OutFile $BoxPath
-        Write-Host "   ✓ Downloaded box.ps1" -ForegroundColor Green
         Write-Host ""
 
         # Run boxer --install to setup profile and directories

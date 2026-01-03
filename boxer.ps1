@@ -6,7 +6,7 @@
     Standalone boxer.ps1 with embedded modules
 
 .NOTES
-    Build Date: 2026-01-03 01:56:17
+    Build Date: 2026-01-03 02:07:30
     Version: 1.0.0
 #>
 
@@ -3322,19 +3322,36 @@ function Install-BoxingSystem {
 function boxer {
     `$boxerPath = "`$env:USERPROFILE\Documents\PowerShell\Scripts\boxer.ps1"
     if (Test-Path `$boxerPath) {
-        . `$boxerPath @args
+        & `$boxerPath @args
     } else {
         Write-Host "Error: boxer.ps1 not found at `$boxerPath" -ForegroundColor Red
     }
 }
 
 function box {
-    `$boxPath = "`$env:USERPROFILE\Documents\PowerShell\Scripts\box.ps1"
-    if (Test-Path `$boxPath) {
-        . `$boxPath @args
-    } else {
-        Write-Host "Error: box.ps1 not found at `$boxPath" -ForegroundColor Red
+    `$boxScript = `$null
+    `$current = (Get-Location).Path
+
+    while (`$current -ne [System.IO.Path]::GetPathRoot(`$current)) {
+        `$testPath = Join-Path `$current ".box\box.ps1"
+        if (Test-Path `$testPath) {
+            `$boxScript = `$testPath
+            break
+        }
+        `$parent = Split-Path `$current -Parent
+        if (-not `$parent) { break }
+        `$current = `$parent
     }
+
+    if (-not `$boxScript) {
+        Write-Host "❌ No box project found" -ForegroundColor Red
+        Write-Host ""
+        Write-Host "Create a new project:" -ForegroundColor Cyan
+        Write-Host "  boxer init MyProject" -ForegroundColor White
+        return
+    }
+
+    & `$boxScript @args
 }
 #endregion boxing
 "@
