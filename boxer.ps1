@@ -6,7 +6,7 @@
     Standalone boxer.ps1 with embedded modules
 
 .NOTES
-    Build Date: 2026-01-03 23:58:30
+    Build Date: 2026-01-04 00:01:27
     Version: 1.0.0
 #>
 
@@ -722,13 +722,16 @@ Write-Host "✓ Boxing functions loaded (boxer, box)" -ForegroundColor Green
         Set-Content -Path $InitPath -Value $InitScript -Encoding UTF8
         Write-Success "Created: init.ps1"
 
+        # Load functions in current session immediately
+        Write-Step "Loading functions in current session..."
+        . $InitPath
+
         Write-Success "Boxing system installed successfully!"
         Write-Host ""
-        Write-Host "  To use boxing in this session:" -ForegroundColor Cyan
-        Write-Host "    . `$env:USERPROFILE\Documents\PowerShell\Boxing\init.ps1" -ForegroundColor White
-        Write-Host ""
-        Write-Host "  Or restart PowerShell and run:" -ForegroundColor Cyan
+        Write-Host "  Ready to use! Try:" -ForegroundColor Cyan
         Write-Host "    boxer init MyProject" -ForegroundColor White
+        Write-Host ""
+        Write-Host "  (Functions loaded in this session and will be available in future sessions)" -ForegroundColor DarkGray
 
     } catch {
         Write-Host "Installation failed: $_" -ForegroundColor Red
