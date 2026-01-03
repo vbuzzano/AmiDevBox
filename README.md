@@ -2,6 +2,22 @@
 
 Amiga development environment with VBCC compiler, NDK 3.9, and build tools.
 
+## Quick Start
+
+Install AmiDevBox in one command:
+
+```powershell
+irm https://github.com/vbuzzano/AmiDevBox/raw/main/install.ps1 | iex
+```
+
+Then restart PowerShell and create a project:
+
+```powershell
+boxer init MyAmiProject
+cd MyAmiProject
+box install
+```
+
 ## Type
 
 **dev** - Complete Amiga 68k development environment
@@ -17,19 +33,26 @@ Amiga development environment with VBCC compiler, NDK 3.9, and build tools.
 
 ## Installation
 
+**One-line install** (recommended):
 ```powershell
-boxer install AmiDevBox
+irm https://github.com/vbuzzano/AmiDevBox/raw/main/install.ps1 | iex
+```
+
+**Manual install** (if Boxing already installed):
+```powershell
+boxer install https://github.com/vbuzzano/AmiDevBox
 ```
 
 ## Usage
 
-Initialize Amiga project:
+Create a new Amiga project:
 ```powershell
-cd your-amiga-project
+boxer init MyAmiProject
+cd MyAmiProject
 box install
 ```
 
-Build:
+Build your project:
 ```bash
 make
 ```

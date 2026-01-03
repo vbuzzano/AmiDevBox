@@ -6,7 +6,7 @@
     Standalone boxer.ps1 with embedded modules
 
 .NOTES
-    Build Date: 2026-01-03 01:11:09
+    Build Date: 2026-01-03 01:26:46
     Version: 1.0.0
 #>
 
@@ -3442,7 +3442,7 @@ function Install-Box {
         Write-Step "Downloading templates..."
         $TplDir = Join-Path $BoxDir "tpl"
         New-Item -ItemType Directory -Path $TplDir -Force | Out-Null
-        
+
         # Use GitHub API to list files in tpl/
         $ApiUrl = "https://api.github.com/repos/$Owner/$Repo/contents/tpl"
         try {
@@ -3484,7 +3484,7 @@ Repository=$BoxUrl
 
     } catch {
         Write-Error-Custom "Box installation failed: $_"
-        
+
         # Cleanup on error
         if (Test-Path $BoxDir) {
             Remove-Item -Path $BoxDir -Recurse -Force -ErrorAction SilentlyContinue
