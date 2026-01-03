@@ -6,7 +6,7 @@
     Standalone boxer.ps1 with embedded modules
 
 .NOTES
-    Build Date: 2026-01-03 02:07:30
+    Build Date: 2026-01-03 21:08:36
     Version: 1.0.0
 #>
 
@@ -3264,16 +3264,8 @@ function Install-BoxingSystem {
 
     try {
         # Paths
-        $ScriptsDir = "$env:USERPROFILE\Documents\PowerShell\Scripts"
         $BoxingDir = "$env:USERPROFILE\Documents\PowerShell\Boxing"
         $ProfilePath = $PROFILE.CurrentUserAllHosts
-
-        # Create Scripts directory
-        if (-not (Test-Path $ScriptsDir)) {
-            Write-Step "Creating Scripts directory..."
-            New-Item -ItemType Directory -Path $ScriptsDir -Force | Out-Null
-            Write-Success "Created: $ScriptsDir"
-        }
 
         # Create Boxing directory
         if (-not (Test-Path $BoxingDir)) {
@@ -3282,19 +3274,15 @@ function Install-BoxingSystem {
             Write-Success "Created: $BoxingDir"
         }
 
-        # Note: boxer.ps1 and box.ps1 should already be in Scripts\ (downloaded by install.ps1)
-        # Verify they exist
-        $BoxerPath = Join-Path $ScriptsDir "boxer.ps1"
-        $BoxPath = Join-Path $ScriptsDir "box.ps1"
-        
+        # Note: boxer.ps1 and box.ps1 should already be in Boxing\ (downloaded by install.ps1)
+        # Verify boxer.ps1 exists
+        $BoxerPath = Join-Path $BoxingDir "boxer.ps1"
+
         if (-not (Test-Path $BoxerPath)) {
             throw "boxer.ps1 not found at $BoxerPath. Installation incomplete."
         }
-        if (-not (Test-Path $BoxPath)) {
-            throw "box.ps1 not found at $BoxPath. Installation incomplete."
-        }
-        
-        Write-Success "Verified: boxer.ps1 and box.ps1 present"
+
+        Write-Success "Verified: boxer.ps1 present"
 
         # Modify PowerShell profile
         Write-Step "Configuring PowerShell profile..."
@@ -3320,7 +3308,7 @@ function Install-BoxingSystem {
 
 #region boxing
 function boxer {
-    `$boxerPath = "`$env:USERPROFILE\Documents\PowerShell\Scripts\boxer.ps1"
+    `$boxerPath = "`$env:USERPROFILE\Documents\PowerShell\Boxing\boxer.ps1"
     if (Test-Path `$boxerPath) {
         & `$boxerPath @args
     } else {
@@ -3469,12 +3457,15 @@ function Install-Box {
             Write-Host "  Warning: tpl/ directory not found or empty" -ForegroundColor Yellow
         }
 
-        # Copy box.ps1 from dist
-        $BoxSource = Join-Path $PSScriptRoot "../../dist/box.ps1"
-        if (Test-Path $BoxSource) {
-            $BoxDest = Join-Path $BoxDir "box.ps1"
-            Copy-Item -Force $BoxSource $BoxDest
-            Write-Success "Copied: box.ps1"
+        # Download box.ps1 from repo
+        Write-Step "Downloading box.ps1..."
+        $BoxUrl = "https://github.com/$Owner/$Repo/raw/main/box.ps1"
+        $BoxDest = Join-Path $BoxDir "box.ps1"
+        try {
+            Invoke-RestMethod -Uri $BoxUrl -OutFile $BoxDest
+            Write-Success "Downloaded: box.ps1"
+        } catch {
+            throw "Failed to download box.ps1: $_"
         }
 
         # Create .boxer manifest
