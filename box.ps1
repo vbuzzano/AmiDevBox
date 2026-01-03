@@ -6,7 +6,7 @@
     Standalone box.ps1 with embedded modules
 
 .NOTES
-    Build Date: 2026-01-04 00:01:27
+    Build Date: 2026-01-04 00:05:10
     Version: 1.0.0
 #>
 
@@ -220,11 +220,16 @@ function Initialize-Boxing {
     )
 
     try {
-        # Auto-installation if no arguments (pattern devbox.ps1)
+        # Auto-installation if no arguments AND not already installed
         if (-not $Arguments -or $Arguments.Count -eq 0) {
-            # In embedded dist/boxer.ps1, all functions are already loaded
-            # Just call Install-BoxingSystem directly
-            return Install-BoxingSystem
+            # Check if Boxing is already installed
+            $BoxingInstalled = Test-Path "$env:USERPROFILE\Documents\PowerShell\Boxing\boxer.ps1"
+            
+            if (-not $BoxingInstalled) {
+                # First-time installation
+                return Install-BoxingSystem
+            }
+            # If already installed, continue to show help
         }
 
         # Step 1: Detect mode
