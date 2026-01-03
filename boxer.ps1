@@ -6,7 +6,7 @@
     Standalone boxer.ps1 with embedded modules
 
 .NOTES
-    Build Date: 2026-01-04 00:49:45
+    Build Date: 2026-01-04 00:53:29
     Version: 1.0.0
 #>
 
@@ -192,7 +192,7 @@ function Initialize-Boxing {
         if (-not $Arguments -or $Arguments.Count -eq 0) {
             # Check if Boxing is already installed
             $BoxingInstalled = Test-Path "$env:USERPROFILE\Documents\PowerShell\Boxing\boxer.ps1"
-            
+
             if (-not $BoxingInstalled) {
                 # First-time installation
                 return Install-BoxingSystem
@@ -467,6 +467,57 @@ function Show-InstallComplete {
 #
 # Handles boxer init command - creating new Box projects
 
+function Get-InstalledVersion {
+    <#
+    .SYNOPSIS
+    Gets the version from a metadata.psd1 file.
+    
+    .PARAMETER MetadataPath
+    Path to metadata.psd1 file
+    
+    .OUTPUTS
+    Version string (e.g., "1.0.0") or $null if not found
+    #>
+    param(
+        [Parameter(Mandatory=$true)]
+        [string]$MetadataPath
+    )
+    
+    if (-not (Test-Path $MetadataPath)) {
+        return $null
+    }
+    
+    try {
+        $metadata = Import-PowerShellDataFile -Path $MetadataPath -ErrorAction Stop
+        return $metadata.Version
+    } catch {
+        return $null
+    }
+}
+
+function Compare-Version {
+    <#
+    .SYNOPSIS
+    Compares two version strings.
+    
+    .OUTPUTS
+    -1 if v1 < v2, 0 if equal, 1 if v1 > v2
+    #>
+    param(
+        [string]$Version1,
+        [string]$Version2
+    )
+    
+    try {
+        $v1 = [version]$Version1
+        $v2 = [version]$Version2
+        return $v1.CompareTo($v2)
+    } catch {
+        # Fallback to string comparison
+        return [string]::Compare($Version1, $Version2)
+    }
+}
+
 function Invoke-Boxer-Init {
     <#
     .SYNOPSIS
@@ -580,16 +631,31 @@ function Install-BoxingSystem {
 
         # Copy boxer.ps1 to Boxing directory (self-installation pattern)
         $BoxerPath = Join-Path $BoxingDir "boxer.ps1"
+        $BoxerMetadataPath = Join-Path $BoxingDir "boxer-metadata.psd1"
         $BoxerAlreadyInstalled = Test-Path $BoxerPath
         
         # Always set source repo for AmiDevBox release (hardcoded in dist build)
         $SourceRepo = "AmiDevBox"
-
-        if ($BoxerAlreadyInstalled) {
-            Write-Success "boxer.ps1 already installed (skipping copy)"
-        } else {
+        
+        # Get versions for comparison
+        $InstalledVersion = Get-InstalledVersion -MetadataPath $BoxerMetadataPath
+        
+        # Get new version from embedded metadata (this script is the new version)
+        $NewVersion = "1.0.0"
+        
+        # Determine if update is needed
+        $NeedsUpdate = $false
+        if (-not $BoxerAlreadyInstalled) {
+            $NeedsUpdate = $true
             Write-Step "Installing boxer.ps1..."
+        } elseif ($InstalledVersion -and (Compare-Version -Version1 $NewVersion -Version2 $InstalledVersion) -gt 0) {
+            $NeedsUpdate = $true
+            Write-Step "Updating boxer.ps1 ($InstalledVersion → $NewVersion)..."
+        } else {
+            Write-Success "boxer.ps1 already up-to-date (v$InstalledVersion)"
+        }
 
+        if ($NeedsUpdate) {
             # If executed via irm|iex, $PSCommandPath is empty - download from GitHub
             if (-not $PSCommandPath -or -not (Test-Path $PSCommandPath)) {
                 $boxerUrl = "https://raw.githubusercontent.com/vbuzzano/AmiDevBox/main/boxer.ps1"
@@ -605,9 +671,16 @@ function Install-BoxingSystem {
                 Copy-Item -Path $PSCommandPath -Destination $BoxerPath -Force
                 Write-Success "Installed: boxer.ps1"
             }
-        }
-
-        # Modify PowerShell profile
+            
+            # Save metadata with version
+            $BoxerMetadata = @"
+@{
+    Version = "$NewVersion"
+    InstallDate = "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
+}
+"@
+            Set-Content -Path $BoxerMetadataPath -Value $BoxerMetadata -Encoding UTF8
+        }        # Modify PowerShell profile
         Write-Step "Configuring PowerShell profile..."
 
         # Create profile directory if needed
@@ -729,7 +802,7 @@ Write-Host "✓ Boxing functions loaded (boxer, box)" -ForegroundColor Green
 
         # Load functions in current session via global scope
         Write-Step "Loading functions in current session..."
-        
+
         $global:function:boxer = {
             $boxerPath = "$env:USERPROFILE\Documents\PowerShell\Boxing\boxer.ps1"
             if (Test-Path $boxerPath) {
@@ -795,7 +868,7 @@ function Install-CurrentBox {
     param(
         [Parameter(Mandatory=$true)]
         [string]$BoxName,
-        
+
         [Parameter(Mandatory=$true)]
         [string]$BoxingDir
     )
@@ -805,18 +878,50 @@ function Install-CurrentBox {
     try {
         $BoxesDir = Join-Path $BoxingDir "Boxes"
         $BoxDir = Join-Path $BoxesDir $BoxName
+        $BoxMetadataPath = Join-Path $BoxDir "metadata.psd1"
 
-        # Check if box already installed
-        if (Test-Path $BoxDir) {
-            Write-Success "$BoxName already installed (skipping)"
+        # Base URL for downloads
+        $BaseUrl = "https://raw.githubusercontent.com/vbuzzano/$BoxName/main"
+        
+        # Get installed version
+        $InstalledVersion = Get-InstalledVersion -MetadataPath $BoxMetadataPath
+        
+        # Get remote version from GitHub
+        $RemoteVersion = $null
+        try {
+            $RemoteMetadataUrl = "$BaseUrl/metadata.psd1"
+            $RemoteMetadataContent = Invoke-RestMethod -Uri $RemoteMetadataUrl -ErrorAction Stop
+            
+            # Parse version from downloaded content
+            if ($RemoteMetadataContent -match 'Version\s*=\s*"([^"]+)"') {
+                $RemoteVersion = $Matches[1]
+            }
+        } catch {
+            Write-Warn "Could not fetch remote version, proceeding with install"
+        }
+        
+        # Determine if update is needed
+        $NeedsUpdate = $false
+        if (-not (Test-Path $BoxDir)) {
+            $NeedsUpdate = $true
+            Write-Step "Installing $BoxName..."
+        } elseif ($RemoteVersion -and $InstalledVersion -and (Compare-Version -Version1 $RemoteVersion -Version2 $InstalledVersion) -gt 0) {
+            $NeedsUpdate = $true
+            Write-Step "Updating $BoxName ($InstalledVersion → $RemoteVersion)..."
+        } elseif ($RemoteVersion -and $InstalledVersion -and (Compare-Version -Version1 $RemoteVersion -Version2 $InstalledVersion) -eq 0) {
+            Write-Success "$BoxName already up-to-date (v$InstalledVersion)"
+            return
+        } else {
+            Write-Success "$BoxName already installed (v$InstalledVersion)"
+            return
+        }
+        
+        if (-not $NeedsUpdate) {
             return
         }
 
         # Create box directory
         New-Item -ItemType Directory -Path $BoxDir -Force | Out-Null
-
-        # Base URL for downloads
-        $BaseUrl = "https://raw.githubusercontent.com/vbuzzano/$BoxName/main"
 
         # Download box.ps1
         Write-Step "Downloading box.ps1..."
@@ -864,7 +969,7 @@ function Install-CurrentBox {
                     # Recursive download for subdirectories
                     $SubDir = Join-Path $TplDir $File.name
                     New-Item -ItemType Directory -Path $SubDir -Force | Out-Null
-                    
+
                     $SubFiles = Invoke-RestMethod -Uri $File.url
                     foreach ($SubFile in $SubFiles) {
                         if ($SubFile.type -eq 'file') {
@@ -883,7 +988,7 @@ function Install-CurrentBox {
 
     } catch {
         Write-Err "Box installation failed: $_"
-        
+
         # Cleanup on error
         if (Test-Path $BoxDir) {
             Remove-Item -Path $BoxDir -Recurse -Force -ErrorAction SilentlyContinue

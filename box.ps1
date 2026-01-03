@@ -6,7 +6,7 @@
     Standalone box.ps1 with embedded modules
 
 .NOTES
-    Build Date: 2026-01-04 00:49:50
+    Build Date: 2026-01-04 00:53:50
     Version: 1.0.0
 #>
 
@@ -224,7 +224,7 @@ function Initialize-Boxing {
         if (-not $Arguments -or $Arguments.Count -eq 0) {
             # Check if Boxing is already installed
             $BoxingInstalled = Test-Path "$env:USERPROFILE\Documents\PowerShell\Boxing\boxer.ps1"
-            
+
             if (-not $BoxingInstalled) {
                 # First-time installation
                 return Install-BoxingSystem
