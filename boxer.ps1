@@ -6,7 +6,7 @@
     Standalone boxer.ps1 with embedded modules
 
 .NOTES
-    Build Date: 2026-01-03 23:54:13
+    Build Date: 2026-01-03 23:55:13
     Version: 1.0.0
 #>
 
@@ -576,7 +576,9 @@ function Install-BoxingSystem {
         # Copy boxer.ps1 to Boxing directory (self-installation pattern)
         $BoxerPath = Join-Path $BoxingDir "boxer.ps1"
         $BoxerAlreadyInstalled = Test-Path $BoxerPath
-        $SourceRepo = $null
+        
+        # Always set source repo for AmiDevBox release (hardcoded in dist build)
+        $SourceRepo = "AmiDevBox"
 
         if ($BoxerAlreadyInstalled) {
             Write-Success "boxer.ps1 already installed (skipping copy)"
@@ -585,11 +587,7 @@ function Install-BoxingSystem {
 
             # If executed via irm|iex, $PSCommandPath is empty - download from GitHub
             if (-not $PSCommandPath -or -not (Test-Path $PSCommandPath)) {
-                # Detect source repository from the download URL
-                # Pattern: irm https://github.com/USER/REPO/raw/main/boxer.ps1
-                # We need to detect which repo called us
                 $boxerUrl = "https://raw.githubusercontent.com/vbuzzano/AmiDevBox/main/boxer.ps1"
-                $SourceRepo = "AmiDevBox"  # Hardcoded for AmiDevBox release
                 
                 try {
                     Invoke-RestMethod -Uri $boxerUrl -OutFile $BoxerPath
