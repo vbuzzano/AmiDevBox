@@ -6,7 +6,7 @@
     Standalone boxer.ps1 with embedded modules
 
 .NOTES
-    Build Date: 2026-01-03 01:26:46
+    Build Date: 2026-01-03 01:56:17
     Version: 1.0.0
 #>
 
@@ -3282,25 +3282,19 @@ function Install-BoxingSystem {
             Write-Success "Created: $BoxingDir"
         }
 
-        # Copy boxer.ps1
-        $BoxerSource = Join-Path $PSScriptRoot "../../dist/boxer.ps1"
-        $BoxerDest = Join-Path $ScriptsDir "boxer.ps1"
-        if (Test-Path $BoxerSource) {
-            Copy-Item -Force $BoxerSource $BoxerDest
-            Write-Success "Installed: boxer.ps1"
-        } else {
-            # If running from install.ps1 context, use current script
-            Copy-Item -Force $PSCommandPath $BoxerDest
-            Write-Success "Installed: boxer.ps1"
+        # Note: boxer.ps1 and box.ps1 should already be in Scripts\ (downloaded by install.ps1)
+        # Verify they exist
+        $BoxerPath = Join-Path $ScriptsDir "boxer.ps1"
+        $BoxPath = Join-Path $ScriptsDir "box.ps1"
+        
+        if (-not (Test-Path $BoxerPath)) {
+            throw "boxer.ps1 not found at $BoxerPath. Installation incomplete."
         }
-
-        # Copy box.ps1
-        $BoxSource = Join-Path $PSScriptRoot "../../dist/box.ps1"
-        $BoxDest = Join-Path $ScriptsDir "box.ps1"
-        if (Test-Path $BoxSource) {
-            Copy-Item -Force $BoxSource $BoxDest
-            Write-Success "Installed: box.ps1"
+        if (-not (Test-Path $BoxPath)) {
+            throw "box.ps1 not found at $BoxPath. Installation incomplete."
         }
+        
+        Write-Success "Verified: boxer.ps1 and box.ps1 present"
 
         # Modify PowerShell profile
         Write-Step "Configuring PowerShell profile..."
