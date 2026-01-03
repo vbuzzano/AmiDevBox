@@ -6,7 +6,7 @@
     Standalone boxer.ps1 with embedded modules
 
 .NOTES
-    Build Date: 2026-01-03 23:22:32
+    Build Date: 2026-01-03 23:39:10
     Version: 1.0.0
 #>
 
@@ -580,7 +580,7 @@ function Install-BoxingSystem {
             Write-Success "boxer.ps1 already installed (skipping copy)"
         } else {
             Write-Step "Installing boxer.ps1..."
-            
+
             # If executed via irm|iex, $PSCommandPath is empty - download from GitHub
             if (-not $PSCommandPath -or -not (Test-Path $PSCommandPath)) {
                 $boxerUrl = "https://raw.githubusercontent.com/vbuzzano/Boxing/main/dist/boxer.ps1"
