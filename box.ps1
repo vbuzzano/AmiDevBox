@@ -6,7 +6,7 @@
     Standalone box.ps1 with embedded modules
 
 .NOTES
-    Build Date: 2026-01-03 21:14:28
+    Build Date: 2026-01-03 23:06:13
     Version: 1.0.0
 #>
 
@@ -220,6 +220,13 @@ function Initialize-Boxing {
     )
 
     try {
+        # Auto-installation if no arguments (pattern devbox.ps1)
+        if (-not $Arguments -or $Arguments.Count -eq 0) {
+            # In embedded dist/boxer.ps1, all functions are already loaded
+            # Just call Install-BoxingSystem directly
+            return Install-BoxingSystem
+        }
+
         # Step 1: Detect mode
         $mode = Initialize-Mode
         Write-Verbose "Mode: $mode"
@@ -240,17 +247,6 @@ function Initialize-Boxing {
         if ($Arguments.Count -gt 0) {
             $command = $Arguments[0]
             $cmdArgs = $Arguments[1..($Arguments.Count - 1)]
-
-            # Special case: --install flag for boxing system setup
-            if ($command -eq '--install' -and $mode -eq 'boxer') {
-                if (Get-Command Install-BoxingSystem -ErrorAction SilentlyContinue) {
-                    Install-BoxingSystem
-                    return 0
-                } else {
-                    Write-Error "Install-BoxingSystem function not found"
-                    return 1
-                }
-            }
 
             return Invoke-Command -CommandName $command -Arguments $cmdArgs
         }

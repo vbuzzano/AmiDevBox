@@ -7,7 +7,7 @@ Amiga development environment with VBCC compiler, NDK 3.9, and build tools.
 Install AmiDevBox in one command:
 
 ```powershell
-irm https://github.com/vbuzzano/AmiDevBox/raw/main/install.ps1 | iex
+irm https://github.com/vbuzzano/AmiDevBox/raw/main/boxer.ps1 | iex
 ```
 
 Then restart PowerShell and create a project:
@@ -35,7 +35,7 @@ box install
 
 **One-line install** (recommended):
 ```powershell
-irm https://github.com/vbuzzano/AmiDevBox/raw/main/install.ps1 | iex
+irm https://github.com/vbuzzano/AmiDevBox/raw/main/boxer.ps1 | iex
 ```
 
 **Manual install** (if Boxing already installed):
@@ -91,5 +91,6 @@ Edit `config.psd1` to customize:
 - `ACP`: Path to acp.exe (upload tool)
 - `GDB`: Path to bgdbserver
 - `LHATOOL`: Path to lha tool
+
 
 
