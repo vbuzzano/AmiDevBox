@@ -6,7 +6,7 @@
     Standalone boxer.ps1 with embedded modules
 
 .NOTES
-    Build Date: 2026-01-03 23:03:05
+    Build Date: 2026-01-03 23:07:50
     Version: 1.0.0
 #>
 
@@ -575,7 +575,7 @@ function Install-BoxingSystem {
 
         # Copy boxer.ps1 to Boxing directory (self-installation pattern)
         $BoxerPath = Join-Path $BoxingDir "boxer.ps1"
-        
+
         if (Test-Path $BoxerPath) {
             Write-Success "boxer.ps1 already installed (skipping copy)"
         } else {
@@ -657,7 +657,7 @@ function box {
         Write-Host "    2. Run: boxer init MyProject" -ForegroundColor White
 
     } catch {
-        Write-Error-Custom "Installation failed: $_"
+        Write-Host "Installation failed: $_" -ForegroundColor Red
         throw
     }
 }
@@ -713,8 +713,7 @@ function Install-Box {
 
         # Check if box already installed
         if (Test-Path $BoxDir) {
-            Write-Error-Custom "Box '$BoxName' is already installed at $BoxDir"
-            return
+            throw "Box '$BoxName' is already installed at $BoxDir"
         }
 
         # Create box directory
@@ -791,7 +790,7 @@ Repository=$BoxUrl
         Write-Host "    boxer init MyProject" -ForegroundColor White
 
     } catch {
-        Write-Error-Custom "Box installation failed: $_"
+        Write-Host "Box installation failed: $_" -ForegroundColor Red
 
         # Cleanup on error
         if (Test-Path $BoxDir) {
