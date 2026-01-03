@@ -6,7 +6,7 @@
     Standalone boxer.ps1 with embedded modules
 
 .NOTES
-    Build Date: 2026-01-03 23:39:55
+    Build Date: 2026-01-03 23:54:13
     Version: 1.0.0
 #>
 
@@ -575,15 +575,22 @@ function Install-BoxingSystem {
 
         # Copy boxer.ps1 to Boxing directory (self-installation pattern)
         $BoxerPath = Join-Path $BoxingDir "boxer.ps1"
+        $BoxerAlreadyInstalled = Test-Path $BoxerPath
+        $SourceRepo = $null
 
-        if (Test-Path $BoxerPath) {
+        if ($BoxerAlreadyInstalled) {
             Write-Success "boxer.ps1 already installed (skipping copy)"
         } else {
             Write-Step "Installing boxer.ps1..."
 
             # If executed via irm|iex, $PSCommandPath is empty - download from GitHub
             if (-not $PSCommandPath -or -not (Test-Path $PSCommandPath)) {
+                # Detect source repository from the download URL
+                # Pattern: irm https://github.com/USER/REPO/raw/main/boxer.ps1
+                # We need to detect which repo called us
                 $boxerUrl = "https://raw.githubusercontent.com/vbuzzano/AmiDevBox/main/boxer.ps1"
+                $SourceRepo = "AmiDevBox"  # Hardcoded for AmiDevBox release
+                
                 try {
                     Invoke-RestMethod -Uri $boxerUrl -OutFile $BoxerPath
                     Write-Success "Downloaded: boxer.ps1"
@@ -663,6 +670,11 @@ function box {
             Write-Success "Profile configured with boxer and box functions"
         }
 
+        # Install box if this is a box repository (not Boxing main repo)
+        if ($SourceRepo) {
+            Install-CurrentBox -BoxName $SourceRepo -BoxingDir $BoxingDir
+        }
+
         Write-Success "Boxing system installed successfully!"
         Write-Host ""
         Write-Host "  Next steps:" -ForegroundColor Cyan
@@ -671,6 +683,117 @@ function box {
 
     } catch {
         Write-Host "Installation failed: $_" -ForegroundColor Red
+        throw
+    }
+}
+
+function Install-CurrentBox {
+    <#
+    .SYNOPSIS
+    Installs the current box from its GitHub repository.
+
+    .PARAMETER BoxName
+    Name of the box to install (e.g., AmiDevBox)
+
+    .PARAMETER BoxingDir
+    Path to Boxing directory
+    #>
+    param(
+        [Parameter(Mandatory=$true)]
+        [string]$BoxName,
+        
+        [Parameter(Mandatory=$true)]
+        [string]$BoxingDir
+    )
+
+    Write-Step "Installing $BoxName box..."
+
+    try {
+        $BoxesDir = Join-Path $BoxingDir "Boxes"
+        $BoxDir = Join-Path $BoxesDir $BoxName
+
+        # Check if box already installed
+        if (Test-Path $BoxDir) {
+            Write-Success "$BoxName already installed (skipping)"
+            return
+        }
+
+        # Create box directory
+        New-Item -ItemType Directory -Path $BoxDir -Force | Out-Null
+
+        # Base URL for downloads
+        $BaseUrl = "https://raw.githubusercontent.com/vbuzzano/$BoxName/main"
+
+        # Download box.ps1
+        Write-Step "Downloading box.ps1..."
+        try {
+            Invoke-RestMethod -Uri "$BaseUrl/box.ps1" -OutFile (Join-Path $BoxDir "box.ps1")
+            Write-Success "Downloaded: box.ps1"
+        } catch {
+            throw "Failed to download box.ps1: $_"
+        }
+
+        # Download config.psd1
+        Write-Step "Downloading config.psd1..."
+        try {
+            Invoke-RestMethod -Uri "$BaseUrl/config.psd1" -OutFile (Join-Path $BoxDir "config.psd1")
+            Write-Success "Downloaded: config.psd1"
+        } catch {
+            Write-Warn "config.psd1 not found (optional)"
+        }
+
+        # Download metadata.psd1
+        Write-Step "Downloading metadata.psd1..."
+        try {
+            Invoke-RestMethod -Uri "$BaseUrl/metadata.psd1" -OutFile (Join-Path $BoxDir "metadata.psd1")
+            Write-Success "Downloaded: metadata.psd1"
+        } catch {
+            Write-Warn "metadata.psd1 not found (optional)"
+        }
+
+        # Download tpl/ directory
+        Write-Step "Downloading templates..."
+        $TplDir = Join-Path $BoxDir "tpl"
+        New-Item -ItemType Directory -Path $TplDir -Force | Out-Null
+
+        # Use GitHub API to list tpl/ contents
+        try {
+            $ApiUrl = "https://api.github.com/repos/vbuzzano/$BoxName/contents/tpl"
+            $TplFiles = Invoke-RestMethod -Uri $ApiUrl
+
+            foreach ($File in $TplFiles) {
+                if ($File.type -eq 'file') {
+                    $FilePath = Join-Path $TplDir $File.name
+                    Invoke-RestMethod -Uri $File.download_url -OutFile $FilePath
+                    Write-Success "Downloaded: tpl/$($File.name)"
+                } elseif ($File.type -eq 'dir') {
+                    # Recursive download for subdirectories
+                    $SubDir = Join-Path $TplDir $File.name
+                    New-Item -ItemType Directory -Path $SubDir -Force | Out-Null
+                    
+                    $SubFiles = Invoke-RestMethod -Uri $File.url
+                    foreach ($SubFile in $SubFiles) {
+                        if ($SubFile.type -eq 'file') {
+                            $SubFilePath = Join-Path $SubDir $SubFile.name
+                            Invoke-RestMethod -Uri $SubFile.download_url -OutFile $SubFilePath
+                            Write-Success "Downloaded: tpl/$($File.name)/$($SubFile.name)"
+                        }
+                    }
+                }
+            }
+        } catch {
+            Write-Warn "tpl/ directory not found or empty"
+        }
+
+        Write-Success "$BoxName box installed successfully!"
+
+    } catch {
+        Write-Err "Box installation failed: $_"
+        
+        # Cleanup on error
+        if (Test-Path $BoxDir) {
+            Remove-Item -Path $BoxDir -Recurse -Force -ErrorAction SilentlyContinue
+        }
         throw
     }
 }
