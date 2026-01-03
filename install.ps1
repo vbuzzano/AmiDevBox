@@ -22,8 +22,8 @@ Write-Host "━━━━━━━━━━━━━━━━━━━━━━�
 Write-Host ""
 
 try {
-    $BoxingScriptsDir = "$env:USERPROFILE\Documents\PowerShell\Scripts"
-    $BoxerPath = Join-Path $BoxingScriptsDir "boxer.ps1"
+    $BoxingDir = "$env:USERPROFILE\Documents\PowerShell\Boxing"
+    $BoxerPath = Join-Path $BoxingDir "boxer.ps1"
 
     # Check if Boxing is already installed (only boxer.ps1 needed, box is a shell function)
     $boxingInstalled = Test-Path $BoxerPath
@@ -32,9 +32,9 @@ try {
         Write-Host "📦 Boxing system not found. Installing..." -ForegroundColor Yellow
         Write-Host ""
 
-        # Create Scripts directory if needed
-        if (-not (Test-Path $BoxingScriptsDir)) {
-            New-Item -ItemType Directory -Path $BoxingScriptsDir -Force | Out-Null
+        # Create Boxing directory if needed
+        if (-not (Test-Path $BoxingDir)) {
+            New-Item -ItemType Directory -Path $BoxingDir -Force | Out-Null
         }
 
         # Download boxer.ps1 from box repo
