@@ -6,7 +6,7 @@
     Standalone boxer.ps1 with embedded modules
 
 .NOTES
-    Build Date: 2026-01-04 00:05:10
+    Build Date: 2026-01-04 00:49:45
     Version: 1.0.0
 #>
 
@@ -727,13 +727,53 @@ Write-Host "✓ Boxing functions loaded (boxer, box)" -ForegroundColor Green
         Set-Content -Path $InitPath -Value $InitScript -Encoding UTF8
         Write-Success "Created: init.ps1"
 
+        # Load functions in current session via global scope
+        Write-Step "Loading functions in current session..."
+        
+        $global:function:boxer = {
+            $boxerPath = "$env:USERPROFILE\Documents\PowerShell\Boxing\boxer.ps1"
+            if (Test-Path $boxerPath) {
+                & $boxerPath @args
+            } else {
+                Write-Host "Error: boxer.ps1 not found at $boxerPath" -ForegroundColor Red
+            }
+        }
+
+        $global:function:box = {
+            $boxScript = $null
+            $current = (Get-Location).Path
+
+            while ($current -ne [System.IO.Path]::GetPathRoot($current)) {
+                $testPath = Join-Path $current ".box\box.ps1"
+                if (Test-Path $testPath) {
+                    $boxScript = $testPath
+                    break
+                }
+                $parent = Split-Path $current -Parent
+                if (-not $parent) { break }
+                $current = $parent
+            }
+
+            if (-not $boxScript) {
+                Write-Host "❌ No box project found" -ForegroundColor Red
+                Write-Host ""
+                Write-Host "Create a new project:" -ForegroundColor Cyan
+                Write-Host "  boxer init MyProject" -ForegroundColor White
+                return
+            }
+
+            & $boxScript @args
+        }
+
+        Write-Success "✓ Boxing functions loaded (boxer, box)"
+
         Write-Success "Boxing system installed successfully!"
         Write-Host ""
-        Write-Host "  To use boxing in this session, run:" -ForegroundColor Cyan
-        Write-Host "    . `$env:USERPROFILE\Documents\PowerShell\Boxing\init.ps1" -ForegroundColor White
-        Write-Host ""
-        Write-Host "  Or restart PowerShell, then run:" -ForegroundColor Cyan
+        Write-Host "  Ready to use! Try:" -ForegroundColor Cyan
         Write-Host "    boxer init MyProject" -ForegroundColor White
+        Write-Host ""
+        Write-Host "  💡 Recommended: Restart PowerShell for permanent installation" -ForegroundColor Yellow
+        Write-Host "     (functions work now, but restart ensures they persist)" -ForegroundColor DarkGray
 
     } catch {
         Write-Host "Installation failed: $_" -ForegroundColor Red
