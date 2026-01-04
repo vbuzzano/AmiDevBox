@@ -6,7 +6,7 @@
     Standalone boxer.ps1 with embedded modules
 
 .NOTES
-    Build Date: 2026-01-04 01:03:30
+    Build Date: 2026-01-04 01:43:56
     Version: 1.0.0
 #>
 
@@ -20,6 +20,9 @@ $ErrorActionPreference = 'Stop'
 # ============================================================================
 # EMBEDDED boxing.ps1 (bootstrapper)
 # ============================================================================
+
+# Flag indicating this is an embedded/compiled version
+$script:IsEmbedded = $true
 
 # BEGIN boxing.ps1
 # Boxing - Common bootstrapper for boxer and box
@@ -40,6 +43,11 @@ $script:BoxingRoot = $PSScriptRoot
 $script:Mode = $null
 $script:LoadedModules = @{}
 $script:Commands = @{}
+
+# Embedded flag - set to $true by build process for compiled versions
+if (-not (Get-Variable -Name IsEmbedded -Scope Script -ErrorAction SilentlyContinue)) {
+    $script:IsEmbedded = $false
+}
 
 # Detect execution mode
 function Initialize-Mode {
@@ -67,6 +75,12 @@ function Initialize-Mode {
 
 # Load core libraries
 function Import-CoreLibraries {
+    # Skip if embedded version - libraries already loaded
+    if ($script:IsEmbedded) {
+        Write-Verbose "Embedded mode: core libraries already loaded"
+        return
+    }
+
     $corePath = Join-Path $script:BoxingRoot 'core'
 
     if (-not (Test-Path $corePath)) {
@@ -89,6 +103,14 @@ function Import-CoreLibraries {
 # Discover and load mode-specific modules
 function Import-ModeModules {
     param([string]$Mode)
+
+    # Skip if embedded version - modules already loaded
+    if ($script:IsEmbedded) {
+        Write-Verbose "Embedded mode: $Mode modules already loaded"
+        # Still need to register commands for embedded version
+        Register-EmbeddedCommands -Mode $Mode
+        return
+    }
 
     $modulesPath = Join-Path $script:BoxingRoot "modules\$Mode"
 
@@ -115,8 +137,33 @@ function Import-ModeModules {
     }
 }
 
+# Register embedded commands (when modules are already loaded)
+function Register-EmbeddedCommands {
+    param([string]$Mode)
+
+    # For embedded versions, register known commands
+    if ($Mode -eq 'boxer') {
+        $script:Commands['init'] = 'Invoke-Boxer-Init'
+        $script:Commands['install'] = 'Install-Box'
+        $script:Commands['list'] = 'Invoke-Boxer-List'
+    }
+    elseif ($Mode -eq 'box') {
+        $script:Commands['install'] = 'Invoke-Box-Install'
+        $script:Commands['env'] = 'Invoke-Box-Env'
+        $script:Commands['clean'] = 'Invoke-Box-Clean'
+        $script:Commands['status'] = 'Invoke-Box-Status'
+        $script:Commands['uninstall'] = 'Invoke-Box-Uninstall'
+    }
+}
+
 # Discover and load shared modules
 function Import-SharedModules {
+    # Skip if embedded version - shared modules already loaded
+    if ($script:IsEmbedded) {
+        Write-Verbose "Embedded mode: shared modules already loaded"
+        return
+    }
+
     $sharedPath = Join-Path $script:BoxingRoot 'modules\shared'
 
     if (-not (Test-Path $sharedPath)) {
@@ -191,12 +238,12 @@ function Invoke-Command {
 # Main bootstrapping function
 function Initialize-Boxing {
     param(
-        [string[]]$Arguments
+        [string[]]$Arguments = @()
     )
 
     try {
         # Auto-installation if no arguments AND not already installed
-        if (-not $Arguments -or $Arguments.Count -eq 0) {
+        if ($Arguments.Count -eq 0) {
             # Check if Boxing is already installed
             $BoxingInstalled = Test-Path "$env:USERPROFILE\Documents\PowerShell\Boxing\boxer.ps1"
 
@@ -420,6 +467,25 @@ function Ask-Path {
 # Display Functions
 # ============================================================================
 
+function Show-Help {
+    Write-Host ""
+    Write-Host "Boxing - Reproducible Development Environment Manager" -ForegroundColor Cyan
+    Write-Host ""
+    Write-Host "Commands:" -ForegroundColor Yellow
+    if ($script:Mode -eq 'boxer') {
+        Write-Host "  boxer init <name>     Create a new Box project" -ForegroundColor White
+        Write-Host "  boxer list            List available Box types" -ForegroundColor White
+        Write-Host "  boxer install <url>   Install a Box from GitHub" -ForegroundColor White
+    } else {
+        Write-Host "  box install           Install workspace packages" -ForegroundColor White
+        Write-Host "  box status            Show installation status" -ForegroundColor White
+        Write-Host "  box env list          List environment variables" -ForegroundColor White
+        Write-Host "  box clean             Clean installation" -ForegroundColor White
+        Write-Host "  box uninstall         Remove all packages" -ForegroundColor White
+    }
+    Write-Host ""
+}
+
 function Show-List {
     Write-Host ""
     Write-Host "Installed Components:" -ForegroundColor Cyan
@@ -620,6 +686,11 @@ function Install-BoxingSystem {
         # Paths
         $BoxingDir = "$env:USERPROFILE\Documents\PowerShell\Boxing"
         $ProfilePath = $PROFILE.CurrentUserAllHosts
+        
+        # Fallback if PROFILE is not set (rare but possible in some contexts)
+        if (-not $ProfilePath) {
+            $ProfilePath = "$env:USERPROFILE\Documents\PowerShell\profile.ps1"
+        }
 
         # Create Boxing directory
         if (-not (Test-Path $BoxingDir)) {
@@ -1187,5 +1258,7 @@ function Invoke-Boxer-List {
 # MAIN - Invoke bootstrapper
 # ============================================================================
 
+# Ensure Arguments is an array (can be null in irm|iex context)
+if (-not $Arguments) { $Arguments = @() }
 Initialize-Boxing -Arguments $Arguments
 
