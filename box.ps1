@@ -6,7 +6,7 @@
     Standalone box.ps1 with embedded modules
 
 .NOTES
-    Build Date: 2026-01-04 02:19:34
+    Build Date: 2026-01-04 02:23:53
     Version: 1.0.0
 #>
 
@@ -272,43 +272,32 @@ function Initialize-Boxing {
 
     try {
         # Auto-installation/update if executed via irm|iex (no $PSScriptRoot)
-        Write-Host "[DEBUG] PSScriptRoot: '$PSScriptRoot'" -ForegroundColor Magenta
-        Write-Host "[DEBUG] Arguments.Count: $($Arguments.Count)" -ForegroundColor Magenta
-        
         if (-not $PSScriptRoot -and $Arguments.Count -eq 0) {
-            Write-Host "[DEBUG] Detected irm|iex execution" -ForegroundColor Magenta
             $BoxerInstalled = "$env:USERPROFILE\Documents\PowerShell\Boxing\boxer.ps1"
-            
+
             # 1. Check if already installed
             if (Test-Path $BoxerInstalled) {
-                Write-Host "[DEBUG] Boxer already installed at: $BoxerInstalled" -ForegroundColor Magenta
-                
                 # 2. Compare versions
                 $InstalledContent = Get-Content $BoxerInstalled -Raw
                 $InstalledVersion = if ($InstalledContent -match 'Version:\s*(\S+)') { $Matches[1] } else { $null }
-                
+
                 $CurrentVersion = "0.1.0"  # Will be replaced by build script
-                
-                Write-Host "[DEBUG] Installed version: $InstalledVersion" -ForegroundColor Magenta
-                Write-Host "[DEBUG] Current version: $CurrentVersion" -ForegroundColor Magenta
-                
-                # 3. Decision: update if different, skip if same
-                if ($InstalledVersion -ne $CurrentVersion) {
-                    Write-Host "[DEBUG] Versions differ - triggering update" -ForegroundColor Magenta
-                    Write-Host ""
-                    Write-Host "🔄 Boxing update: $InstalledVersion → $CurrentVersion" -ForegroundColor Cyan
-                    return Install-BoxingSystem
-                } else {
-                    Write-Host "[DEBUG] Versions match - skipping update" -ForegroundColor Magenta
+
+                # 3. Decision: upgrade only if new version > installed version
+                try {
+                    if ($InstalledVersion -and $CurrentVersion -and ([version]$CurrentVersion -gt [version]$InstalledVersion)) {
+                        Write-Host ""
+                        Write-Host "🔄 Boxing update: $InstalledVersion → $CurrentVersion" -ForegroundColor Cyan
+                        return Install-BoxingSystem
+                    }
+                } catch {
+                    # Version parsing failed, skip update
                 }
-                # Already up-to-date, continue to show help
+                # Skip if same version or downgrade
             } else {
-                Write-Host "[DEBUG] Boxer not installed - first-time installation" -ForegroundColor Magenta
                 # First-time installation
                 return Install-BoxingSystem
             }
-        } else {
-            Write-Host "[DEBUG] Not irm|iex execution - normal mode" -ForegroundColor Magenta
         }        # Step 1: Detect mode
         $mode = Initialize-Mode
         Write-Verbose "Mode: $mode"
