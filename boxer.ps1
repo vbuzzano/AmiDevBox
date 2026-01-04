@@ -6,8 +6,8 @@
     Standalone boxer.ps1 with embedded modules
 
 .NOTES
-    Build Date: 2026-01-04 02:08:07
-    Version: 1.0.8
+    Build Date: 2026-01-04 02:14:02
+    Version: 1.0.9
 #>
 
 param(
@@ -252,16 +252,16 @@ function Initialize-Boxing {
                 # First-time installation
                 return Install-BoxingSystem
             }
-            
+
             # Check for updates (if metadata exists and version is embedded)
             if ((Test-Path $BoxerMetadataPath) -and $script:IsEmbedded) {
                 # Get installed version from metadata
                 $InstalledVersion = Get-InstalledVersion -MetadataPath $BoxerMetadataPath
-                
+
                 # Get current version (defined in Install-BoxingSystem in embedded mode)
                 # This will be injected by build script
                 $NewVersion = "0.1.0"  # Will be replaced by build script
-                
+
                 # Compare versions
                 if ($InstalledVersion -and (Compare-Version -Version1 $NewVersion -Version2 $InstalledVersion) -gt 0) {
                     Write-Host ""
@@ -737,7 +737,7 @@ function Install-BoxingSystem {
         $InstalledVersion = Get-InstalledVersion -MetadataPath $BoxerMetadataPath
 
         # Get new version from embedded metadata (this script is the new version)
-        $NewVersion = "1.0.8"
+        $NewVersion = "1.0.9"
 
         # Determine if update is needed
         $NeedsUpdate = $false
