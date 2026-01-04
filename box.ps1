@@ -6,7 +6,7 @@
     Standalone box.ps1 with embedded modules
 
 .NOTES
-    Build Date: 2026-01-04 00:53:50
+    Build Date: 2026-01-04 01:03:36
     Version: 1.0.0
 #>
 
@@ -75,6 +75,13 @@ $script:Commands = @{}
 
 # Detect execution mode
 function Initialize-Mode {
+    # When executed via irm|iex, $MyInvocation.PSCommandPath is empty
+    # In this case, default to 'boxer' mode for installation
+    if (-not $MyInvocation.PSCommandPath) {
+        $script:Mode = 'boxer'
+        return $script:Mode
+    }
+
     $scriptName = [System.IO.Path]::GetFileNameWithoutExtension($MyInvocation.PSCommandPath)
 
     if ($scriptName -eq 'boxer') {
