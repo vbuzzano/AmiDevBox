@@ -6,8 +6,8 @@
     Standalone boxer.ps1 with embedded modules
 
 .NOTES
-    Build Date: 2026-01-04 02:14:02
-    Version: 1.0.9
+    Build Date: 2026-01-04 02:18:06
+    Version: 1.0.10
 #>
 
 param(
@@ -242,37 +242,30 @@ function Initialize-Boxing {
     )
 
     try {
-        # Auto-installation/update if no arguments
-        if ($Arguments.Count -eq 0) {
-            # Check if Boxing is already installed
-            $BoxingInstalled = Test-Path "$env:USERPROFILE\Documents\PowerShell\Boxing\boxer.ps1"
-            $BoxerMetadataPath = "$env:USERPROFILE\Documents\PowerShell\Boxing\boxer-metadata.psd1"
-
-            if (-not $BoxingInstalled) {
+        # Auto-installation/update if executed via irm|iex (no $PSScriptRoot)
+        if (-not $PSScriptRoot -and $Arguments.Count -eq 0) {
+            $BoxerInstalled = "$env:USERPROFILE\Documents\PowerShell\Boxing\boxer.ps1"
+            
+            # 1. Check if already installed
+            if (Test-Path $BoxerInstalled) {
+                # 2. Compare versions
+                $InstalledContent = Get-Content $BoxerInstalled -Raw
+                $InstalledVersion = if ($InstalledContent -match 'Version:\s*(\S+)') { $Matches[1] } else { $null }
+                
+                $CurrentVersion = "0.1.0"  # Will be replaced by build script
+                
+                # 3. Decision: update if different, skip if same
+                if ($InstalledVersion -ne $CurrentVersion) {
+                    Write-Host ""
+                    Write-Host "🔄 Boxing update: $InstalledVersion → $CurrentVersion" -ForegroundColor Cyan
+                    return Install-BoxingSystem
+                }
+                # Already up-to-date, continue to show help
+            } else {
                 # First-time installation
                 return Install-BoxingSystem
             }
-
-            # Check for updates (if metadata exists and version is embedded)
-            if ((Test-Path $BoxerMetadataPath) -and $script:IsEmbedded) {
-                # Get installed version from metadata
-                $InstalledVersion = Get-InstalledVersion -MetadataPath $BoxerMetadataPath
-
-                # Get current version (defined in Install-BoxingSystem in embedded mode)
-                # This will be injected by build script
-                $NewVersion = "0.1.0"  # Will be replaced by build script
-
-                # Compare versions
-                if ($InstalledVersion -and (Compare-Version -Version1 $NewVersion -Version2 $InstalledVersion) -gt 0) {
-                    Write-Host ""
-                    Write-Host "🔄 Boxing update available: $InstalledVersion → $NewVersion" -ForegroundColor Cyan
-                    return Install-BoxingSystem
-                }
-            }
-            # If already installed and up-to-date, continue to show help
-        }
-
-        # Step 1: Detect mode
+        }        # Step 1: Detect mode
         $mode = Initialize-Mode
         Write-Verbose "Mode: $mode"
 
@@ -737,7 +730,7 @@ function Install-BoxingSystem {
         $InstalledVersion = Get-InstalledVersion -MetadataPath $BoxerMetadataPath
 
         # Get new version from embedded metadata (this script is the new version)
-        $NewVersion = "1.0.9"
+        $NewVersion = "1.0.10"
 
         # Determine if update is needed
         $NeedsUpdate = $false
