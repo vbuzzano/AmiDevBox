@@ -6,8 +6,8 @@
     Standalone boxer.ps1 with embedded modules
 
 .NOTES
-    Build Date: 2026-01-04 02:25:09
-    Version: 1.0.14
+    Build Date: 2026-01-04 02:25:15
+    Version: 1.0.15
 #>
 
 param(
@@ -252,7 +252,7 @@ function Initialize-Boxing {
                 $InstalledContent = Get-Content $BoxerInstalled -Raw
                 $InstalledVersion = if ($InstalledContent -match 'Version:\s*(\S+)') { $Matches[1] } else { $null }
 
-                $CurrentVersion = "1.0.14"
+                $CurrentVersion = "1.0.15"
 
                 # 3. Decision: upgrade only if new version > installed version
                 try {
@@ -734,7 +734,7 @@ function Install-BoxingSystem {
         $InstalledVersion = Get-InstalledVersion -MetadataPath $BoxerMetadataPath
 
         # Get new version from embedded metadata (this script is the new version)
-        $NewVersion = "1.0.14"
+        $NewVersion = "1.0.15"
 
         # Determine if update is needed
         $NeedsUpdate = $false
