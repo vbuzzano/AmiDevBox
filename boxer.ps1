@@ -6,7 +6,7 @@
     Standalone boxer.ps1 with embedded modules
 
 .NOTES
-    Build Date: 2026-01-05 03:18:11
+    Build Date: 2026-01-05 03:25:06
     Version: 1.0.1
 #>
 
@@ -1031,6 +1031,15 @@ function Install-CurrentBox {
             Write-Success "Downloaded: metadata.psd1"
         } catch {
             Write-Warn "metadata.psd1 not found (optional)"
+        }
+
+        # Download env.ps1 (environment configuration)
+        Write-Step "Downloading env.ps1..."
+        try {
+            Invoke-RestMethod -Uri "$BaseUrl/env.ps1" -OutFile (Join-Path $BoxDir "env.ps1")
+            Write-Success "Downloaded: env.ps1"
+        } catch {
+            Write-Warn "env.ps1 not found (optional)"
         }
 
         # Download tpl/ directory (FILES ONLY, no subdirectories)
