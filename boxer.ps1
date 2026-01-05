@@ -6,7 +6,7 @@
     Standalone boxer.ps1 with embedded modules
 
 .NOTES
-    Build Date: 2026-01-04 03:34:08
+    Build Date: 2026-01-05 01:53:17
     Version: 1.0.1
 #>
 
@@ -801,43 +801,13 @@ function Install-BoxingSystem {
         if ($ProfileContent -match '#region boxing') {
             Write-Success "Profile already configured (skipping)"
         } else {
-            # Add Boxing region to profile
+            # Add Boxing region to profile (lightweight dot-source approach)
             $BoxingRegion = @"
 
 #region boxing
-function boxer {
-    `$boxerPath = "`$env:USERPROFILE\Documents\PowerShell\Boxing\boxer.ps1"
-    if (Test-Path `$boxerPath) {
-        & `$boxerPath @args
-    } else {
-        Write-Host "Error: boxer.ps1 not found at `$boxerPath" -ForegroundColor Red
-    }
-}
-
-function box {
-    `$boxScript = `$null
-    `$current = (Get-Location).Path
-
-    while (`$current -ne [System.IO.Path]::GetPathRoot(`$current)) {
-        `$testPath = Join-Path `$current ".box\box.ps1"
-        if (Test-Path `$testPath) {
-            `$boxScript = `$testPath
-            break
-        }
-        `$parent = Split-Path `$current -Parent
-        if (-not `$parent) { break }
-        `$current = `$parent
-    }
-
-    if (-not `$boxScript) {
-        Write-Host "❌ No box project found" -ForegroundColor Red
-        Write-Host ""
-        Write-Host "Create a new project:" -ForegroundColor Cyan
-        Write-Host "  boxer init MyProject" -ForegroundColor White
-        return
-    }
-
-    & `$boxScript @args
+`$boxingInit = "`$env:USERPROFILE\Documents\PowerShell\Boxing\init.ps1"
+if (Test-Path `$boxingInit) {
+    . `$boxingInit
 }
 #endregion boxing
 "@
@@ -845,7 +815,7 @@ function box {
             # Append to profile
             $ProfileContent += $BoxingRegion
             Set-Content -Path $ProfilePath -Value $ProfileContent -Encoding UTF8
-            Write-Success "Profile configured with boxer and box functions"
+            Write-Success "Profile configured with Boxing loader"
         }
 
         # Install box if this is a box repository (not Boxing main repo)
@@ -1238,6 +1208,65 @@ Repository=$BoxUrl
         }
         throw
     }
+}
+
+# ============================================================================
+# Version Detection Functions
+# ============================================================================
+
+function Get-InstalledBoxVersion {
+    <#
+    .SYNOPSIS
+    Gets the version of an installed box.
+
+    .PARAMETER BoxName
+    Name of the box to check.
+
+    .RETURNS
+    Version string if installed, $null otherwise.
+    #>
+    param(
+        [Parameter(Mandatory=$true)]
+        [string]$BoxName
+    )
+
+    $BoxingDir = "$env:USERPROFILE\Documents\PowerShell\Boxing"
+    $MetadataPath = Join-Path $BoxingDir "$BoxName\metadata.psd1"
+
+    if (Test-Path $MetadataPath) {
+        try {
+            $Metadata = Import-PowerShellDataFile $MetadataPath
+            return $Metadata.Version
+        } catch {
+            Write-Verbose "Failed to read metadata for ${BoxName}: $($_.Exception.Message)"
+            return $null
+        }
+    }
+
+    return $null
+}
+
+function Get-RemoteBoxVersion {
+    <#
+    .SYNOPSIS
+    Gets the version from remote metadata content.
+
+    .PARAMETER MetadataContent
+    Raw content of metadata.psd1 file.
+
+    .RETURNS
+    Version string if found, $null otherwise.
+    #>
+    param(
+        [Parameter(Mandatory=$true)]
+        [string]$MetadataContent
+    )
+
+    if ($MetadataContent -match 'Version\s*=\s*"([^"]*)"') {
+        return $Matches[1]
+    }
+
+    return $null
 }
 
 # END modules/boxer/install.ps1

@@ -1,7 +1,7 @@
 @{
     BoxName = "AmiDevBox"
     BoxType = "dev"
-    BuildDate = "2026-01-04"
+    BuildDate = "2026-01-05"
     Version = "1.0.1"
     BoxerVersion = "1.0.1"  # Updated by dist.ps1 from boxer.ps1
     Author = "Vincent Buzzano"
