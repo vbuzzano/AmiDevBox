@@ -6,8 +6,8 @@
     Standalone boxer.ps1 with embedded modules
 
 .NOTES
-    Build Date: 2026-01-05 04:04:50
-    Version: 1.0.9
+    Build Date: 2026-01-05 04:05:52
+    Version: 1.0.10
 #>
 
 param(
@@ -25,7 +25,7 @@ $ErrorActionPreference = 'Stop'
 $script:IsEmbedded = $true
 
 # Embedded version information (injected by build script)
-$script:BoxerVersion = "1.0.9"
+$script:BoxerVersion = "1.0.10"
 
 # BEGIN boxing.ps1
 # Boxing - Common bootstrapper for boxer and box
@@ -257,7 +257,7 @@ function Initialize-Boxing {
                 $InstalledContent = Get-Content $BoxerInstalled -Raw
                 $InstalledVersion = if ($InstalledContent -match 'Version:\s*(\S+)') { $Matches[1] } else { $null }
 
-                $CurrentVersion = "1.0.9"
+                $CurrentVersion = "1.0.10"
 
                 # 3. Decision: upgrade only if new version > installed version
                 try {
@@ -265,6 +265,10 @@ function Initialize-Boxing {
                         Write-Host ""
                         Write-Host "🔄 Boxing update: $InstalledVersion → $CurrentVersion" -ForegroundColor Cyan
                         Install-BoxingSystem | Out-Null
+                        return
+                    } elseif ($InstalledVersion -and $CurrentVersion) {
+                        # Already up-to-date or newer installed, exit silently
+                        return
                     }
                 } catch {
                     # Version parsing failed, skip update
@@ -272,6 +276,7 @@ function Initialize-Boxing {
             } else {
                 # First-time installation
                 Install-BoxingSystem | Out-Null
+                return
             }
         }        # Step 1: Detect mode
         $mode = Initialize-Mode
@@ -741,7 +746,7 @@ function Install-BoxingSystem {
         $InstalledVersion = Get-InstalledVersion -MetadataPath $BoxerMetadataPath
 
         # Get new version from embedded metadata (this script is the new version)
-        $NewVersion = "1.0.9"
+        $NewVersion = "1.0.10"
 
         # Determine if update is needed
         $NeedsUpdate = $false
