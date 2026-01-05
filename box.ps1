@@ -6,8 +6,8 @@
     Standalone box.ps1 with embedded modules
 
 .NOTES
-    Build Date: 2026-01-05 06:42:48
-    Version: 0.1.44
+    Build Date: 2026-01-05 06:45:30
+    Version: 0.1.48
 #>
 
 param(
@@ -25,7 +25,7 @@ $ErrorActionPreference = 'Stop'
 # ============================================================================
 
 # Embedded version information (injected by build script)
-$script:BoxerVersion = "0.1.44"
+$script:BoxerVersion = "0.1.48"
 
 $BaseDir = Get-Location
 $BoxDir = $null
@@ -282,8 +282,8 @@ function Initialize-Boxing {
 
             # 1. Check if already installed
             if (Test-Path $BoxerInstalled) {
-                # 2. Get installed version by executing boxer -version
-                $InstalledVersion = & $BoxerInstalled -version 2>$null
+                # 2. Get installed version by executing boxer version
+                $InstalledVersion = & $BoxerInstalled version 2>$null
                 if (-not $InstalledVersion) { $InstalledVersion = $null }
 
                 # Get current version via core API (works in all modes)
