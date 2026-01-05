@@ -6,7 +6,7 @@
     Standalone box.ps1 with embedded modules
 
 .NOTES
-    Build Date: 2026-01-05 02:45:14
+    Build Date: 2026-01-05 03:18:11
     Version: 1.0.1
 #>
 
@@ -293,19 +293,22 @@ function Initialize-Boxing {
                     if ($InstalledVersion -and $CurrentVersion -and ([version]$CurrentVersion -gt [version]$InstalledVersion)) {
                         Write-Host ""
                         Write-Host "🔄 Boxing update: $InstalledVersion → $CurrentVersion" -ForegroundColor Cyan
-                        Install-BoxingSystem
-                        return
+                        Install-BoxingSystem | Out-Null
+                        return 0
                     }
                 } catch {
                     # Version parsing failed, skip update
                 }
-                # Already up-to-date
-                Write-Host "✅ Boxer already up-to-date (v$InstalledVersion)" -ForegroundColor Green
-                return
+                # Boxer up-to-date, but check if box needs install/update
+                if ($script:SourceRepo) {
+                    $BoxingDir = "$env:USERPROFILE\Documents\PowerShell\Boxing"
+                    Install-CurrentBox -BoxName $script:SourceRepo -BoxingDir $BoxingDir
+                }
+                return 0
             } else {
                 # First-time installation
-                Install-BoxingSystem
-                return
+                Install-BoxingSystem | Out-Null
+                return 0
             }
         }        # Step 1: Detect mode
         $mode = Initialize-Mode
@@ -333,9 +336,11 @@ function Initialize-Boxing {
             }
 
             Invoke-Command -CommandName $command -Arguments $cmdArgs | Out-Null
+            return 0
         }
         else {
             Show-Help
+            return 0
         }
     }
     catch {
