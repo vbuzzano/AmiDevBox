@@ -6,8 +6,8 @@
     Standalone box.ps1 with embedded modules
 
 .NOTES
-    Build Date: 2026-01-05 04:21:34
-    Version: 0.1.5
+    Build Date: 2026-01-05 04:37:14
+    Version: 0.1.8
 #>
 
 param(
@@ -25,7 +25,7 @@ $ErrorActionPreference = 'Stop'
 # ============================================================================
 
 # Embedded version information (injected by build script)
-$script:BoxerVersion = "0.1.5"
+$script:BoxerVersion = "0.1.8"
 
 $BaseDir = Get-Location
 $BoxDir = $null
@@ -293,11 +293,14 @@ function Initialize-Boxing {
                 try {
                     if ($InstalledVersion -and $CurrentVersion -and ([version]$CurrentVersion -gt [version]$InstalledVersion)) {
                         Write-Host ""
-                        Write-Host "🔄 Boxing update: $InstalledVersion → $CurrentVersion" -ForegroundColor Cyan
+                        Write-Host "🔄 Boxer update: $InstalledVersion → $CurrentVersion" -ForegroundColor Cyan
                         Install-BoxingSystem | Out-Null
                         return
                     } elseif ($InstalledVersion -and $CurrentVersion) {
-                        # Already up-to-date or newer installed, exit silently
+                        # Already up-to-date or newer installed
+                        Write-Host "✓ Boxer already up-to-date (v$InstalledVersion)" -ForegroundColor Green
+                        # Check if box needs update (Install-BoxingSystem handles this)
+                        Install-BoxingSystem | Out-Null
                         return
                     }
                 } catch {
