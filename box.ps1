@@ -6,8 +6,8 @@
     Standalone box.ps1 with embedded modules
 
 .NOTES
-    Build Date: 2026-01-05 02:03:23
-    Version: 1.0.2
+    Build Date: 2026-01-05 02:03:48
+    Version: 1.0.1
 #>
 
 param(
@@ -25,7 +25,7 @@ $ErrorActionPreference = 'Stop'
 # ============================================================================
 
 # Embedded version information (injected by build script)
-$script:BoxerVersion = "1.0.2"
+$script:BoxerVersion = "1.0.1"
 
 $BaseDir = Get-Location
 $BoxDir = $null
@@ -299,7 +299,8 @@ function Initialize-Boxing {
                 } catch {
                     # Version parsing failed, skip update
                 }
-                # Skip if same version or downgrade
+                # Already up-to-date - exit silently for irm|iex
+                return
             } else {
                 # First-time installation
                 Install-BoxingSystem
