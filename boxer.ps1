@@ -6,8 +6,8 @@
     Standalone boxer.ps1 with embedded modules
 
 .NOTES
-    Build Date: 2026-01-05 05:24:33
-    Version: 0.1.29
+    Build Date: 2026-01-05 05:26:34
+    Version: 0.1.30
 #>
 
 param(
@@ -25,7 +25,7 @@ $ErrorActionPreference = 'Stop'
 $script:IsEmbedded = $true
 
 # Embedded version information (injected by build script)
-$script:BoxerVersion = "0.1.29"
+$script:BoxerVersion = "0.1.30"
 
 # BEGIN boxing.ps1
 # Boxing - Common bootstrapper for boxer and box
@@ -815,7 +815,7 @@ function Install-BoxingSystem {
         if ($NeedsUpdate) {
             # If executed via irm|iex, $PSCommandPath is empty - download from GitHub
             if (-not $PSCommandPath -or -not (Test-Path $PSCommandPath)) {
-                $boxerUrl = "https://raw.githubusercontent.com/vbuzzano/AmiDevBox/main/boxer.ps1"
+                $boxerUrl = "https://raw.githubusercontent.com/vbuzzano/AmiDevBox/refs/heads/main/boxer.ps1"
 
                 try {
                     Invoke-RestMethod -Uri $boxerUrl -OutFile $BoxerPath
@@ -1021,7 +1021,7 @@ function Install-CurrentBox {
         $BoxMetadataPath = Join-Path $BoxDir "metadata.psd1"
 
         # Base URL for downloads
-        $BaseUrl = "https://raw.githubusercontent.com/vbuzzano/$BoxName/main"
+        $BaseUrl = "https://raw.githubusercontent.com/vbuzzano/$BoxName/refs/heads/main"
 
         # Get installed version and boxer version
         $InstalledVersion = Get-InstalledVersion -MetadataPath $BoxMetadataPath
