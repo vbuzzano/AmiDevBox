@@ -6,8 +6,8 @@
     Standalone boxer.ps1 with embedded modules
 
 .NOTES
-    Build Date: 2026-01-05 05:16:59
-    Version: 0.1.26
+    Build Date: 2026-01-05 05:20:17
+    Version: 0.1.27
 #>
 
 param(
@@ -25,7 +25,7 @@ $ErrorActionPreference = 'Stop'
 $script:IsEmbedded = $true
 
 # Embedded version information (injected by build script)
-$script:BoxerVersion = "0.1.26"
+$script:BoxerVersion = "0.1.27"
 
 # BEGIN boxing.ps1
 # Boxing - Common bootstrapper for boxer and box
