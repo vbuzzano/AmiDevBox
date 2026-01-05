@@ -6,8 +6,8 @@
     Standalone boxer.ps1 with embedded modules
 
 .NOTES
-    Build Date: 2026-01-05 05:02:43
-    Version: 0.1.15
+    Build Date: 2026-01-05 05:08:59
+    Version: 0.1.17
 #>
 
 param(
@@ -25,7 +25,7 @@ $ErrorActionPreference = 'Stop'
 $script:IsEmbedded = $true
 
 # Embedded version information (injected by build script)
-$script:BoxerVersion = "0.1.15"
+$script:BoxerVersion = "0.1.17"
 
 # BEGIN boxing.ps1
 # Boxing - Common bootstrapper for boxer and box
@@ -1015,8 +1015,6 @@ function Install-CurrentBox {
         [string]$BoxingDir
     )
 
-    Write-Step "Installing $BoxName box..."
-
     try {
         $BoxesDir = Join-Path $BoxingDir "Boxes"
         $BoxDir = Join-Path $BoxesDir $BoxName
@@ -1025,18 +1023,27 @@ function Install-CurrentBox {
         # Base URL for downloads
         $BaseUrl = "https://raw.githubusercontent.com/vbuzzano/$BoxName/main"
 
-        # Get installed version
+        # Get installed version and boxer version
         $InstalledVersion = Get-InstalledVersion -MetadataPath $BoxMetadataPath
+        $InstalledBoxerVersion = $null
+        if (Test-Path $BoxMetadataPath) {
+            $metadata = Import-PowerShellDataFile $BoxMetadataPath
+            $InstalledBoxerVersion = $metadata.BoxerVersion
+        }
 
-        # Get remote version from GitHub
+        # Get remote version and boxer version from GitHub
         $RemoteVersion = $null
+        $RemoteBoxerVersion = $null
         try {
             $RemoteMetadataUrl = "$BaseUrl/metadata.psd1"
             $RemoteMetadataContent = Invoke-RestMethod -Uri $RemoteMetadataUrl -ErrorAction Stop
 
-            # Parse version from downloaded content
+            # Parse version and boxer version from downloaded content
             if ($RemoteMetadataContent -match 'Version\s*=\s*"([^"]+)"') {
                 $RemoteVersion = $Matches[1]
+            }
+            if ($RemoteMetadataContent -match 'BoxerVersion\s*=\s*"([^"]+)"') {
+                $RemoteBoxerVersion = $Matches[1]
             }
         } catch {
             Write-Warn "Could not fetch remote version, proceeding with install"
@@ -1044,18 +1051,27 @@ function Install-CurrentBox {
 
         # Determine if update is needed
         $NeedsUpdate = $false
+        $UpdateReason = ""
+
         if (-not (Test-Path $BoxDir)) {
             $NeedsUpdate = $true
-            Write-Step "Installing $BoxName..."
+            $UpdateReason = "Installing $BoxName box..."
         } elseif ($RemoteVersion -and $InstalledVersion -and (Compare-Version -Version1 $RemoteVersion -Version2 $InstalledVersion) -gt 0) {
             $NeedsUpdate = $true
-            Write-Step "Updating $BoxName ($InstalledVersion → $RemoteVersion)..."
+            $UpdateReason = "Updating $BoxName box ($InstalledVersion → $RemoteVersion)..."
+        } elseif ($RemoteBoxerVersion -and $InstalledBoxerVersion -and (Compare-Version -Version1 $RemoteBoxerVersion -Version2 $InstalledBoxerVersion) -gt 0) {
+            $NeedsUpdate = $true
+            $UpdateReason = "Updating $BoxName box (core $InstalledBoxerVersion → $RemoteBoxerVersion)..."
         } elseif ($RemoteVersion -and $InstalledVersion -and (Compare-Version -Version1 $RemoteVersion -Version2 $InstalledVersion) -eq 0) {
             Write-Success "$BoxName already up-to-date (v$InstalledVersion)"
             return
         } else {
             Write-Success "$BoxName already installed (v$InstalledVersion)"
             return
+        }
+
+        if ($NeedsUpdate) {
+            Write-Step $UpdateReason
         }
 
         if (-not $NeedsUpdate) {
