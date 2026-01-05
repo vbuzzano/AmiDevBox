@@ -6,8 +6,8 @@
     Standalone boxer.ps1 with embedded modules
 
 .NOTES
-    Build Date: 2026-01-05 06:54:08
-    Version: 0.1.50
+    Build Date: 2026-01-05 07:18:07
+    Version: 0.1.53
 #>
 
 param(
@@ -25,7 +25,7 @@ $ErrorActionPreference = 'Stop'
 $script:IsEmbedded = $true
 
 # Embedded version information (injected by build script)
-$script:BoxerVersion = "0.1.50"
+$script:BoxerVersion = "0.1.53"
 
 # BEGIN boxing.ps1
 # Boxing - Common bootstrapper for boxer and box
@@ -768,7 +768,8 @@ function Install-BoxingSystem {
         $SourceRepo = "AmiDevBox"
 
         # Get versions for comparison
-        $InstalledVersion = if ($BoxerAlreadyInstalled) { & $BoxerPath version 2>$null } else { $null }
+        $InstalledVersionRaw = if ($BoxerAlreadyInstalled) { & $BoxerPath version 2>$null } else { $null }
+        $InstalledVersion = if ($InstalledVersionRaw -match 'v?(\d+\.\d+\.\d+)') { $Matches[1] } else { $null }
 
         # Get new version via core API (works in all modes)
         $NewVersion = Get-BoxerVersion
