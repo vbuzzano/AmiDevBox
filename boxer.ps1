@@ -6,8 +6,8 @@
     Standalone boxer.ps1 with embedded modules
 
 .NOTES
-    Build Date: 2026-01-05 06:45:30
-    Version: 0.1.48
+    Build Date: 2026-01-05 06:54:08
+    Version: 0.1.50
 #>
 
 param(
@@ -25,7 +25,7 @@ $ErrorActionPreference = 'Stop'
 $script:IsEmbedded = $true
 
 # Embedded version information (injected by build script)
-$script:BoxerVersion = "0.1.48"
+$script:BoxerVersion = "0.1.50"
 
 # BEGIN boxing.ps1
 # Boxing - Common bootstrapper for boxer and box
@@ -254,28 +254,28 @@ function Initialize-Boxing {
             # 1. Check if already installed
             if (Test-Path $BoxerInstalled) {
                 # 2. Get installed version by executing boxer version
-                $InstalledVersion = & $BoxerInstalled version 2>$null
-                if (-not $InstalledVersion) { $InstalledVersion = $null }
+                $InstalledVersionRaw = & $BoxerInstalled version 2>$null
+                if ($InstalledVersionRaw -match 'v?(\d+\.\d+\.\d+)') {
+                    $InstalledVersion = $Matches[1]
+                } else {
+                    $InstalledVersion = $null
+                }
 
                 # Get current version via core API (works in all modes)
                 $CurrentVersion = Get-BoxerVersion
 
                 # 3. Decision: upgrade only if new version > installed version
-                try {
-                    if ($InstalledVersion -and $CurrentVersion -and ([version]$CurrentVersion -gt [version]$InstalledVersion)) {
-                        Write-Host ""
-                        Write-Host "🔄 Boxer update: $InstalledVersion → $CurrentVersion" -ForegroundColor Cyan
-                        Install-BoxingSystem | Out-Null
-                        return
-                    } elseif ($InstalledVersion -and $CurrentVersion) {
-                        # Already up-to-date or newer installed
-                        Write-Host "✓ Boxer already up-to-date (v$InstalledVersion)" -ForegroundColor Green
-                        # Check if box needs update (Install-BoxingSystem handles this)
-                        Install-BoxingSystem | Out-Null
-                        return
-                    }
-                } catch {
-                    # Version parsing failed, skip update
+                if ($InstalledVersion -and $CurrentVersion -and ([version]$CurrentVersion -gt [version]$InstalledVersion)) {
+                    Write-Host ""
+                    Write-Host "🔄 Boxer update: $InstalledVersion → $CurrentVersion" -ForegroundColor Cyan
+                    Install-BoxingSystem | Out-Null
+                    return
+                } elseif ($InstalledVersion -and $CurrentVersion) {
+                    # Already up-to-date or newer installed
+                    Write-Host "✓ Boxer already up-to-date (v$InstalledVersion)" -ForegroundColor Green
+                    # Check if box needs update (Install-BoxingSystem handles this)
+                    Install-BoxingSystem | Out-Null
+                    return
                 }
             } else {
                 # First-time installation
