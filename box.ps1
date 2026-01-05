@@ -6,7 +6,7 @@
     Standalone box.ps1 with embedded modules
 
 .NOTES
-    Build Date: 2026-01-05 02:31:43
+    Build Date: 2026-01-05 02:45:14
     Version: 1.0.1
 #>
 
@@ -299,7 +299,8 @@ function Initialize-Boxing {
                 } catch {
                     # Version parsing failed, skip update
                 }
-                # Already up-to-date - exit silently for irm|iex
+                # Already up-to-date
+                Write-Host "✅ Boxer already up-to-date (v$InstalledVersion)" -ForegroundColor Green
                 return
             } else {
                 # First-time installation
