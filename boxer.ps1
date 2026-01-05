@@ -6,7 +6,7 @@
     Standalone boxer.ps1 with embedded modules
 
 .NOTES
-    Build Date: 2026-01-05 03:28:36
+    Build Date: 2026-01-05 03:38:32
     Version: 1.0.1
 #>
 
@@ -268,11 +268,6 @@ function Initialize-Boxing {
                     }
                 } catch {
                     # Version parsing failed, skip update
-                }
-                # Boxer up-to-date, but check if box needs install/update
-                if ($script:SourceRepo) {
-                    $BoxingDir = "$env:USERPROFILE\Documents\PowerShell\Boxing"
-                    Install-CurrentBox -BoxName $script:SourceRepo -BoxingDir $BoxingDir
                 }
             } else {
                 # First-time installation
