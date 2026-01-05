@@ -6,7 +6,7 @@
     Standalone boxer.ps1 with embedded modules
 
 .NOTES
-    Build Date: 2026-01-05 02:07:03
+    Build Date: 2026-01-05 02:11:28
     Version: 1.0.1
 #>
 
@@ -1312,9 +1312,6 @@ function Invoke-Boxer-Version {
     }
 
     Write-Host "Boxing v$BoxerVersion" -ForegroundColor Cyan
-}
-
-    Write-Host ""
 }
 
 # END modules/boxer/version.ps1
