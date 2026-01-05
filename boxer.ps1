@@ -6,8 +6,8 @@
     Standalone boxer.ps1 with embedded modules
 
 .NOTES
-    Build Date: 2026-01-05 04:05:52
-    Version: 1.0.10
+    Build Date: 2026-01-05 04:21:34
+    Version: 0.1.5
 #>
 
 param(
@@ -25,7 +25,7 @@ $ErrorActionPreference = 'Stop'
 $script:IsEmbedded = $true
 
 # Embedded version information (injected by build script)
-$script:BoxerVersion = "1.0.10"
+$script:BoxerVersion = "0.1.5"
 
 # BEGIN boxing.ps1
 # Boxing - Common bootstrapper for boxer and box
@@ -257,7 +257,8 @@ function Initialize-Boxing {
                 $InstalledContent = Get-Content $BoxerInstalled -Raw
                 $InstalledVersion = if ($InstalledContent -match 'Version:\s*(\S+)') { $Matches[1] } else { $null }
 
-                $CurrentVersion = "1.0.10"
+                # Get current version via core API (works in all modes)
+                $CurrentVersion = Get-BoxerVersion
 
                 # 3. Decision: upgrade only if new version > installed version
                 try {
@@ -555,6 +556,54 @@ function Show-InstallComplete {
 }
 
 # END core/ui.ps1
+# BEGIN core/version.ps1
+# ============================================================================
+# Version Management Functions
+# ============================================================================
+
+function Get-BoxerVersion {
+    <#
+    .SYNOPSIS
+    Gets the current boxer version from various sources.
+
+    .DESCRIPTION
+    Returns the boxer version, trying in order:
+    1. Embedded $script:BoxerVersion (compiled mode)
+    2. boxer.version file (development mode)
+    3. Header comment from boxer.ps1 (fallback)
+
+    .OUTPUTS
+    Version string (e.g., "1.0.10") or $null if not found
+    #>
+
+    # 1. Try embedded version (compiled/runtime)
+    if ($script:BoxerVersion) {
+        return $script:BoxerVersion
+    }
+
+    # 2. Try reading from source file (development mode)
+    $versionFile = Join-Path $script:BoxingRoot "boxer.version"
+    if (Test-Path $versionFile) {
+        $version = (Get-Content $versionFile -Raw).Trim()
+        if ($version) {
+            return $version
+        }
+    }
+
+    # 3. Try reading from boxer.ps1 header (fallback)
+    $boxerFile = Join-Path $script:BoxingRoot "dist\boxer.ps1"
+    if (Test-Path $boxerFile) {
+        $content = Get-Content $boxerFile -Raw
+        if ($content -match 'Version:\s*(\S+)') {
+            return $Matches[1]
+        }
+    }
+
+    # Not found
+    return $null
+}
+
+# END core/version.ps1
 
 # ============================================================================
 # EMBEDDED modules/boxer/*.ps1 (boxer commands)
@@ -745,8 +794,8 @@ function Install-BoxingSystem {
         # Get versions for comparison
         $InstalledVersion = Get-InstalledVersion -MetadataPath $BoxerMetadataPath
 
-        # Get new version from embedded metadata (this script is the new version)
-        $NewVersion = "1.0.10"
+        # Get new version via core API (works in all modes)
+        $NewVersion = Get-BoxerVersion
 
         # Determine if update is needed
         $NeedsUpdate = $false
