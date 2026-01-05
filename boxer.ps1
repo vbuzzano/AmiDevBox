@@ -6,7 +6,7 @@
     Standalone boxer.ps1 with embedded modules
 
 .NOTES
-    Build Date: 2026-01-05 01:57:55
+    Build Date: 2026-01-05 02:03:23
     Version: 1.0.2
 #>
 
@@ -264,7 +264,8 @@ function Initialize-Boxing {
                     if ($InstalledVersion -and $CurrentVersion -and ([version]$CurrentVersion -gt [version]$InstalledVersion)) {
                         Write-Host ""
                         Write-Host "🔄 Boxing update: $InstalledVersion → $CurrentVersion" -ForegroundColor Cyan
-                        return Install-BoxingSystem
+                        Install-BoxingSystem
+                        return
                     }
                 } catch {
                     # Version parsing failed, skip update
@@ -272,7 +273,8 @@ function Initialize-Boxing {
                 # Skip if same version or downgrade
             } else {
                 # First-time installation
-                return Install-BoxingSystem
+                Install-BoxingSystem
+                return
             }
         }        # Step 1: Detect mode
         $mode = Initialize-Mode
