@@ -6,8 +6,8 @@
     Standalone boxer.ps1 with embedded modules
 
 .NOTES
-    Build Date: 2026-01-05 05:57:57
-    Version: 0.1.42
+    Build Date: 2026-01-05 06:42:48
+    Version: 0.1.44
 #>
 
 param(
@@ -25,7 +25,7 @@ $ErrorActionPreference = 'Stop'
 $script:IsEmbedded = $true
 
 # Embedded version information (injected by build script)
-$script:BoxerVersion = "0.1.42"
+$script:BoxerVersion = "0.1.44"
 
 # BEGIN boxing.ps1
 # Boxing - Common bootstrapper for boxer and box
@@ -253,9 +253,9 @@ function Initialize-Boxing {
 
             # 1. Check if already installed
             if (Test-Path $BoxerInstalled) {
-                # 2. Compare versions
-                $InstalledContent = Get-Content $BoxerInstalled -Raw
-                $InstalledVersion = if ($InstalledContent -match 'Version:\s*(\S+)') { $Matches[1] } else { $null }
+                # 2. Get installed version by executing boxer -version
+                $InstalledVersion = & $BoxerInstalled -version 2>$null
+                if (-not $InstalledVersion) { $InstalledVersion = $null }
 
                 # Get current version via core API (works in all modes)
                 $CurrentVersion = Get-BoxerVersion
@@ -567,43 +567,17 @@ function Show-InstallComplete {
 function Get-BoxerVersion {
     <#
     .SYNOPSIS
-    Gets the current boxer version from various sources.
+    Gets the current boxer version.
 
     .DESCRIPTION
-    Returns the boxer version, trying in order:
-    1. Embedded $script:BoxerVersion (compiled mode)
-    2. boxer.version file (development mode)
-    3. Header comment from boxer.ps1 (fallback)
+    Returns the boxer version from the embedded $script:BoxerVersion variable.
+    This variable MUST exist in the script - if not, it's a build error.
 
     .OUTPUTS
-    Version string (e.g., "1.0.10") or $null if not found
+    Version string (e.g., "0.1.43")
     #>
 
-    # 1. Try embedded version (compiled/runtime)
-    if ($script:BoxerVersion) {
-        return $script:BoxerVersion
-    }
-
-    # 2. Try reading from source file (development mode)
-    $versionFile = Join-Path $script:BoxingRoot "boxer.version"
-    if (Test-Path $versionFile) {
-        $version = (Get-Content $versionFile -Raw).Trim()
-        if ($version) {
-            return $version
-        }
-    }
-
-    # 3. Try reading from boxer.ps1 header (fallback)
-    $boxerFile = Join-Path $script:BoxingRoot "dist\boxer.ps1"
-    if (Test-Path $boxerFile) {
-        $content = Get-Content $boxerFile -Raw
-        if ($content -match 'Version:\s*(\S+)') {
-            return $Matches[1]
-        }
-    }
-
-    # Not found
-    return $null
+    return $script:BoxerVersion
 }
 
 # END core/version.ps1
@@ -788,14 +762,13 @@ function Install-BoxingSystem {
 
         # Copy boxer.ps1 to Boxing directory (self-installation pattern)
         $BoxerPath = Join-Path $BoxingDir "boxer.ps1"
-        $BoxerMetadataPath = Join-Path $BoxingDir "boxer-metadata.psd1"
         $BoxerAlreadyInstalled = Test-Path $BoxerPath
 
         # Always set source repo for AmiDevBox release (hardcoded in dist build)
         $SourceRepo = "AmiDevBox"
 
         # Get versions for comparison
-        $InstalledVersion = Get-InstalledVersion -MetadataPath $BoxerMetadataPath
+        $InstalledVersion = if ($BoxerAlreadyInstalled) { & $BoxerPath -version 2>$null } else { $null }
 
         # Get new version via core API (works in all modes)
         $NewVersion = Get-BoxerVersion
@@ -828,16 +801,9 @@ function Install-BoxingSystem {
                 Copy-Item -Path $PSCommandPath -Destination $BoxerPath -Force
                 Write-Success "Installed: boxer.ps1"
             }
+        }
 
-            # Save metadata with version
-            $BoxerMetadata = @"
-@{
-    Version = "$NewVersion"
-    InstallDate = "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
-}
-"@
-            Set-Content -Path $BoxerMetadataPath -Value $BoxerMetadata -Encoding UTF8
-        }        # Modify PowerShell profile
+        # Modify PowerShell profile
         Write-Step "Configuring PowerShell profile..."
 
         # Create profile directory if needed
@@ -871,11 +837,6 @@ if (Test-Path `$boxingInit) {
             $ProfileContent += $BoxingRegion
             Set-Content -Path $ProfilePath -Value $ProfileContent -Encoding UTF8
             Write-Success "Profile configured with Boxing loader"
-        }
-
-        # Install box if this is a box repository (not Boxing main repo)
-        if ($SourceRepo) {
-            Install-CurrentBox -BoxName $SourceRepo -BoxingDir $BoxingDir
         }
 
         # Determine if we need to configure profile and load functions
@@ -929,6 +890,11 @@ Write-Host "✓ Boxing functions loaded (boxer, box)" -ForegroundColor Green
 "@
             $InitPath = Join-Path $BoxingDir "init.ps1"
             Set-Content -Path $InitPath -Value $InitScript -Encoding UTF8
+        }
+
+        # Install box if this is a box repository (not Boxing main repo)
+        if ($SourceRepo) {
+            Install-CurrentBox -BoxName $SourceRepo -BoxingDir $BoxingDir
         }
 
         # Load functions in current session only if needed (profile not configured or function missing)

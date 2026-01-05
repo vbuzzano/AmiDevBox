@@ -6,8 +6,8 @@
     Standalone box.ps1 with embedded modules
 
 .NOTES
-    Build Date: 2026-01-05 05:57:57
-    Version: 0.1.42
+    Build Date: 2026-01-05 06:42:48
+    Version: 0.1.44
 #>
 
 param(
@@ -25,7 +25,7 @@ $ErrorActionPreference = 'Stop'
 # ============================================================================
 
 # Embedded version information (injected by build script)
-$script:BoxerVersion = "0.1.42"
+$script:BoxerVersion = "0.1.44"
 
 $BaseDir = Get-Location
 $BoxDir = $null
@@ -282,9 +282,9 @@ function Initialize-Boxing {
 
             # 1. Check if already installed
             if (Test-Path $BoxerInstalled) {
-                # 2. Compare versions
-                $InstalledContent = Get-Content $BoxerInstalled -Raw
-                $InstalledVersion = if ($InstalledContent -match 'Version:\s*(\S+)') { $Matches[1] } else { $null }
+                # 2. Get installed version by executing boxer -version
+                $InstalledVersion = & $BoxerInstalled -version 2>$null
+                if (-not $InstalledVersion) { $InstalledVersion = $null }
 
                 # Get current version via core API (works in all modes)
                 $CurrentVersion = Get-BoxerVersion
@@ -3253,43 +3253,17 @@ function Show-InstallComplete {
 function Get-BoxerVersion {
     <#
     .SYNOPSIS
-    Gets the current boxer version from various sources.
+    Gets the current boxer version.
 
     .DESCRIPTION
-    Returns the boxer version, trying in order:
-    1. Embedded $script:BoxerVersion (compiled mode)
-    2. boxer.version file (development mode)
-    3. Header comment from boxer.ps1 (fallback)
+    Returns the boxer version from the embedded $script:BoxerVersion variable.
+    This variable MUST exist in the script - if not, it's a build error.
 
     .OUTPUTS
-    Version string (e.g., "1.0.10") or $null if not found
+    Version string (e.g., "0.1.43")
     #>
 
-    # 1. Try embedded version (compiled/runtime)
-    if ($script:BoxerVersion) {
-        return $script:BoxerVersion
-    }
-
-    # 2. Try reading from source file (development mode)
-    $versionFile = Join-Path $script:BoxingRoot "boxer.version"
-    if (Test-Path $versionFile) {
-        $version = (Get-Content $versionFile -Raw).Trim()
-        if ($version) {
-            return $version
-        }
-    }
-
-    # 3. Try reading from boxer.ps1 header (fallback)
-    $boxerFile = Join-Path $script:BoxingRoot "dist\boxer.ps1"
-    if (Test-Path $boxerFile) {
-        $content = Get-Content $boxerFile -Raw
-        if ($content -match 'Version:\s*(\S+)') {
-            return $Matches[1]
-        }
-    }
-
-    # Not found
-    return $null
+    return $script:BoxerVersion
 }
 
 # END core/version.ps1
