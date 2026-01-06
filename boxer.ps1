@@ -6,8 +6,8 @@
     Standalone boxer.ps1 with embedded modules
 
 .NOTES
-    Build Date: 2026-01-05 07:23:33
-    Version: 0.1.42
+    Build Date: 2026-01-06 23:22:55
+    Version: 0.1.43
 #>
 
 param(
@@ -25,7 +25,7 @@ $ErrorActionPreference = 'Stop'
 $script:IsEmbedded = $true
 
 # Embedded version information (injected by build script)
-$script:BoxerVersion = "0.1.42"
+$script:BoxerVersion = "0.1.43"
 
 # BEGIN boxing.ps1
 # Boxing - Common bootstrapper for boxer and box
@@ -1059,13 +1059,14 @@ function Install-CurrentBox {
         } elseif ($RemoteVersion -and $InstalledVersion -and (Compare-Version -Version1 $RemoteVersion -Version2 $InstalledVersion) -gt 0) {
             $NeedsUpdate = $true
             $UpdateReason = "Updating $BoxName box ($InstalledVersion → $RemoteVersion)..."
-        } elseif ($RemoteBoxerVersion -and $InstalledBoxerVersion -and (Compare-Version -Version1 $RemoteBoxerVersion -Version2 $InstalledBoxerVersion) -gt 0) {
-            $NeedsUpdate = $true
-            $UpdateReason = "Updating $BoxName box (core $InstalledBoxerVersion → $RemoteBoxerVersion)..."
         } elseif ($RemoteVersion -and $InstalledVersion -and (Compare-Version -Version1 $RemoteVersion -Version2 $InstalledVersion) -eq 0) {
+            Write-Host ""
+            Write-Host "=== $BoxName Box ===" -ForegroundColor Cyan
             Write-Success "$BoxName already up-to-date (v$InstalledVersion)"
             return
         } else {
+            Write-Host ""
+            Write-Host "=== $BoxName Box ===" -ForegroundColor Cyan
             Write-Success "$BoxName already installed (v$InstalledVersion)"
             return
         }
