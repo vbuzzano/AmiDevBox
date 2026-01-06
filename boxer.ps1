@@ -6,8 +6,8 @@
     Standalone boxer.ps1 with embedded modules
 
 .NOTES
-    Build Date: 2026-01-06 23:22:55
-    Version: 0.1.43
+    Build Date: 2026-01-07 00:51:04
+    Version: 0.1.44
 #>
 
 param(
@@ -25,7 +25,7 @@ $ErrorActionPreference = 'Stop'
 $script:IsEmbedded = $true
 
 # Embedded version information (injected by build script)
-$script:BoxerVersion = "0.1.43"
+$script:BoxerVersion = "0.1.44"
 
 # BEGIN boxing.ps1
 # Boxing - Common bootstrapper for boxer and box
@@ -670,37 +670,175 @@ function Compare-Version {
     }
 }
 
+function Sanitize-ProjectName {
+    <#
+    .SYNOPSIS
+    Sanitizes a project name to make it a valid directory name.
+
+    .PARAMETER Name
+    The project name to sanitize
+
+    .OUTPUTS
+    Sanitized project name suitable for directory creation
+    #>
+    param([string]$Name)
+
+    # Remove/replace invalid characters for directory names
+    $sanitized = $Name -replace '[/\\()^''":\[\]<>|?*]', '-'
+    # Convert to lowercase
+    $sanitized = $sanitized.ToLower()
+    # Remove trailing dots and spaces
+    $sanitized = $sanitized -replace '[\s.]+$', ''
+    # Remove leading/trailing dashes
+    $sanitized = $sanitized -replace '^-+|-+$', ''
+    # Keep only alphanumeric, dash, dot, underscore, plus
+    $sanitized = $sanitized -replace '[^a-z0-9.\-_+]', '-'
+
+    return $sanitized
+}
+
+function Get-InstalledBoxes {
+    <#
+    .SYNOPSIS
+    Gets list of installed boxes from Boxing directory.
+
+    .OUTPUTS
+    Array of box names (directory names in Boxing\Boxes\)
+    #>
+
+    $BoxingDir = "$env:USERPROFILE\Documents\PowerShell\Boxing"
+    $BoxesDir = Join-Path $BoxingDir "Boxes"
+
+    if (-not (Test-Path $BoxesDir)) {
+        return @()
+    }
+
+    $boxes = Get-ChildItem -Path $BoxesDir -Directory | Select-Object -ExpandProperty Name
+    return $boxes
+}
+
 function Invoke-Boxer-Init {
     <#
     .SYNOPSIS
     Creates a new Box project with full structure.
 
-    .PARAMETER ProjectName
-    Name of the project to create
+    .PARAMETER Name
+    Name of the project to create (optional - will prompt if not provided)
 
-    .PARAMETER Description
-    Optional project description
+    .PARAMETER Path
+    Custom path where to create the project (optional - uses Name in current dir if not provided)
+
+    .PARAMETER Box
+    Which box to use (optional - auto-detects if only one installed, prompts if multiple)
 
     .EXAMPLE
-    boxer init MyProject "My awesome project"
+    boxer init
+    # Prompts for name, uses current directory, auto-selects box
+
+    .EXAMPLE
+    boxer init MyProject
+    # Creates MyProject in current directory, auto-selects box
+
+    .EXAMPLE
+    boxer init MyProject C:\Dev\MyProject
+    # Creates project at specific path
+
+    .EXAMPLE
+    boxer init -Name MyProject -Box AmiDevBox
+    # Explicitly specifies box to use
     #>
     param(
-        [Parameter(Mandatory=$true)]
-        [string]$ProjectName,
-        [string]$Description = ""
+        [Parameter(Position=0)]
+        [string]$Name = "",
+
+        [Parameter(Position=1)]
+        [string]$Path = "",
+
+        [string]$Box = ""
     )
 
-    # Sanitize project name
-    $SafeName = $ProjectName -replace '[^\w\-]', '-'
-    $TargetDir = Join-Path (Get-Location) $SafeName
+    # Prompt for name if not provided
+    if ([string]::IsNullOrWhiteSpace($Name)) {
+        $Name = Read-Host "Project name"
+        if ([string]::IsNullOrWhiteSpace($Name)) {
+            Write-Err "Project name is required"
+            return
+        }
+    }
 
-    # Check if directory exists
-    if (Test-Path $TargetDir) {
-        Write-Err "Directory '$SafeName' already exists"
+    # Sanitize project name
+    $SafeName = Sanitize-ProjectName -Name $Name
+    if ([string]::IsNullOrWhiteSpace($SafeName)) {
+        Write-Err "Invalid project name after sanitization"
         return
     }
 
-    Write-Step "Creating project: $ProjectName"
+    # Determine target directory
+    if ([string]::IsNullOrWhiteSpace($Path)) {
+        $TargetDir = Join-Path (Get-Location) $SafeName
+    } else {
+        $TargetDir = $Path
+    }
+
+    # Check if directory exists
+    if (Test-Path $TargetDir) {
+        Write-Err "Directory '$TargetDir' already exists"
+        return
+    }
+
+    # Get installed boxes
+    $InstalledBoxes = Get-InstalledBoxes
+
+    if ($InstalledBoxes.Count -eq 0) {
+        Write-Err "No boxes installed"
+        Write-Host ""
+        Write-Host "  Install a box first:" -ForegroundColor Yellow
+        Write-Host "    irm https://raw.githubusercontent.com/vbuzzano/AmiDevBox/main/boxer.ps1 | iex" -ForegroundColor Cyan
+        return
+    }
+
+    # Determine which box to use
+    $SelectedBox = ""
+
+    if (-not [string]::IsNullOrWhiteSpace($Box)) {
+        # Box explicitly specified
+        if ($InstalledBoxes -contains $Box) {
+            $SelectedBox = $Box
+        } else {
+            Write-Err "Box '$Box' not found"
+            Write-Host ""
+            Write-Host "  Available boxes:" -ForegroundColor Yellow
+            $InstalledBoxes | ForEach-Object { Write-Host "    - $_" -ForegroundColor Cyan }
+            return
+        }
+    } elseif ($InstalledBoxes.Count -eq 1) {
+        # Auto-select if only one box installed
+        $SelectedBox = $InstalledBoxes[0]
+        Write-Host "  Using box: $SelectedBox" -ForegroundColor Gray
+    } else {
+        # Multiple boxes - prompt user
+        Write-Host ""
+        Write-Host "  Select a box:" -ForegroundColor Yellow
+        for ($i = 0; $i -lt $InstalledBoxes.Count; $i++) {
+            Write-Host "    [$($i+1)] $($InstalledBoxes[$i])" -ForegroundColor Cyan
+        }
+        Write-Host ""
+        $choice = Read-Host "  Choose box (1-$($InstalledBoxes.Count))"
+
+        $choiceNum = 0
+        if ([int]::TryParse($choice, [ref]$choiceNum) -and $choiceNum -ge 1 -and $choiceNum -le $InstalledBoxes.Count) {
+            $SelectedBox = $InstalledBoxes[$choiceNum - 1]
+        } else {
+            Write-Err "Invalid choice"
+            return
+        }
+    }
+
+    Write-Host ""
+    Write-Step "Creating project: $Name"
+    Write-Host "  Directory: $TargetDir" -ForegroundColor Gray
+    Write-Host "  Box: $SelectedBox" -ForegroundColor Gray
+    Write-Host ""
 
     try {
         # Create project directory
@@ -710,29 +848,50 @@ function Invoke-Boxer-Init {
         $BoxPath = Join-Path $TargetDir ".box"
         New-Item -ItemType Directory -Path $BoxPath -Force | Out-Null
 
-        # Copy box.ps1 and boxing.ps1
-        $LocalBoxPath = Join-Path (Split-Path -Parent $PSScriptRoot) "boxing.ps1"
-        if (Test-Path $LocalBoxPath) {
-            Copy-Item $LocalBoxPath (Join-Path $BoxPath "boxing.ps1") -Force
-            Write-Success "Copied: boxing.ps1"
+        # Copy box files from Boxing\Boxes\{SelectedBox}\ to .box\
+        $BoxingDir = "$env:USERPROFILE\Documents\PowerShell\Boxing"
+        $SourceBoxDir = Join-Path (Join-Path $BoxingDir "Boxes") $SelectedBox
+
+        Write-Step "Copying box files..."
+
+        # Get all files in source box directory
+        $filesToCopy = Get-ChildItem -Path $SourceBoxDir -File
+
+        foreach ($file in $filesToCopy) {
+            # Skip boxer.ps1 (global only, not for projects)
+            if ($file.Name -eq "boxer.ps1") {
+                continue
+            }
+
+            $destPath = Join-Path $BoxPath $file.Name
+            Copy-Item -Path $file.FullName -Destination $destPath -Force
+            Write-Success "Copied: $($file.Name)"
         }
 
-        # Copy config.psd1
-        $LocalConfigPath = Join-Path (Split-Path -Parent $PSScriptRoot) "config.psd1"
-        if (Test-Path $LocalConfigPath) {
-            Copy-Item $LocalConfigPath (Join-Path $BoxPath "config.psd1") -Force
-            Write-Success "Copied: config.psd1"
+        # Copy tpl/ directory recursively if it exists
+        $SourceTplDir = Join-Path $SourceBoxDir "tpl"
+        if (Test-Path $SourceTplDir) {
+            $DestTplDir = Join-Path $BoxPath "tpl"
+            Copy-Item -Path $SourceTplDir -Destination $DestTplDir -Recurse -Force
+
+            $tplCount = (Get-ChildItem -Path $DestTplDir -File -Recurse).Count
+            Write-Success "Copied: tpl/ ($tplCount templates)"
         }
 
-        # Create basic structure
+        # Create basic project structure
+        Write-Step "Creating project structure..."
         @('src', 'docs', 'scripts', 'vendor') | ForEach-Object {
             New-Item -ItemType Directory -Path (Join-Path $TargetDir $_) -Force | Out-Null
         }
+        Write-Success "Created: src, docs, scripts, vendor"
 
+        Write-Host ""
         Write-Success "Project created: $SafeName"
+        Write-Host ""
         Write-Host "  Next steps:" -ForegroundColor Cyan
         Write-Host "    cd $SafeName" -ForegroundColor White
         Write-Host "    box install" -ForegroundColor White
+        Write-Host ""
 
     } catch {
         Write-Err "Project creation failed: $_"
@@ -816,10 +975,15 @@ function Install-BoxingSystem {
             # If executed via irm|iex, $PSCommandPath is empty - download from GitHub
             if (-not $PSCommandPath -or -not (Test-Path $PSCommandPath)) {
                 $boxerUrl = "https://raw.githubusercontent.com/vbuzzano/AmiDevBox/main/boxer.ps1"
+                $initUrl = "https://raw.githubusercontent.com/vbuzzano/AmiDevBox/main/init.ps1"
 
                 try {
                     Invoke-RestMethod -Uri $boxerUrl -OutFile $BoxerPath
                     Write-Success "Downloaded: boxer.ps1"
+
+                    $InitPath = Join-Path $BoxingDir "init.ps1"
+                    Invoke-RestMethod -Uri $initUrl -OutFile $InitPath
+                    Write-Success "Downloaded: init.ps1"
                 } catch {
                     throw "Failed to download boxer.ps1 from $boxerUrl : $_"
                 }
