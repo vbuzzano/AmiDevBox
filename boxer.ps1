@@ -6,8 +6,8 @@
     Standalone boxer.ps1 with embedded modules
 
 .NOTES
-    Build Date: 2026-01-07 23:59:23
-    Version: 0.1.60
+    Build Date: 2026-01-08 00:23:11
+    Version: 0.1.61
 #>
 
 param(
@@ -25,7 +25,7 @@ $ErrorActionPreference = 'Stop'
 $script:IsEmbedded = $true
 
 # Embedded version information (injected by build script)
-$script:BoxerVersion = "0.1.60"
+$script:BoxerVersion = "0.1.61"
 
 # BEGIN boxing.ps1
 # Boxing - Common bootstrapper for boxer and box
@@ -1468,6 +1468,12 @@ function Install-CurrentBox {
         # Download tpl/ directory (FILES ONLY, no subdirectories)
         Write-Step "Downloading templates..."
         $TplDir = Join-Path $BoxDir "tpl"
+        
+        # Clean tpl directory if updating (remove old files)
+        if (Test-Path $TplDir) {
+            Remove-Item -Path $TplDir -Recurse -Force
+        }
+        
         New-Item -ItemType Directory -Path $TplDir -Force | Out-Null
 
         # Use GitHub API to list tpl/ contents
