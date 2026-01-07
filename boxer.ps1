@@ -6,8 +6,8 @@
     Standalone boxer.ps1 with embedded modules
 
 .NOTES
-    Build Date: 2026-01-07 17:39:53
-    Version: 0.1.55
+    Build Date: 2026-01-07 23:07:29
+    Version: 0.1.57
 #>
 
 param(
@@ -25,7 +25,7 @@ $ErrorActionPreference = 'Stop'
 $script:IsEmbedded = $true
 
 # Embedded version information (injected by build script)
-$script:BoxerVersion = "0.1.55"
+$script:BoxerVersion = "0.1.57"
 
 # BEGIN boxing.ps1
 # Boxing - Common bootstrapper for boxer and box
@@ -853,8 +853,8 @@ function Invoke-Boxer-Init {
     # Update BoxPath for later use
     $BoxPath = Join-Path $TargetDir ".box"
 
-    # Get installed boxes
-    $InstalledBoxes = Get-InstalledBoxes
+    # Get installed boxes (force array to avoid $null)
+    $InstalledBoxes = @(Get-InstalledBoxes)
 
     if ($InstalledBoxes.Count -eq 0) {
         Write-Err "No boxes installed"
