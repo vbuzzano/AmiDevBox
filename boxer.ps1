@@ -6,8 +6,8 @@
     Standalone boxer.ps1 with embedded modules
 
 .NOTES
-    Build Date: 2026-01-07 17:29:14
-    Version: 0.1.54
+    Build Date: 2026-01-07 17:39:53
+    Version: 0.1.55
 #>
 
 param(
@@ -25,7 +25,7 @@ $ErrorActionPreference = 'Stop'
 $script:IsEmbedded = $true
 
 # Embedded version information (injected by build script)
-$script:BoxerVersion = "0.1.54"
+$script:BoxerVersion = "0.1.55"
 
 # BEGIN boxing.ps1
 # Boxing - Common bootstrapper for boxer and box
@@ -824,6 +824,9 @@ function Invoke-Boxer-Init {
             if ([string]::IsNullOrWhiteSpace($Name)) {
                 Write-Err "Project name is required"
                 return
+            }
+        }
+
         # Sanitize project name
         $SafeName = Sanitize-ProjectName -Name $Name
         if ([string]::IsNullOrWhiteSpace($SafeName)) {
@@ -834,9 +837,6 @@ function Invoke-Boxer-Init {
         # Prompt for description if not provided
         if ([string]::IsNullOrWhiteSpace($Description)) {
             $Description = Read-Host "Description (optional)"
-        }
-
-        # Determine target directory
         }
 
         # Determine target directory
