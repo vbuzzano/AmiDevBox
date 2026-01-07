@@ -6,8 +6,8 @@
     Standalone boxer.ps1 with embedded modules
 
 .NOTES
-    Build Date: 2026-01-07 05:57:47
-    Version: 0.1.53
+    Build Date: 2026-01-07 17:29:14
+    Version: 0.1.54
 #>
 
 param(
@@ -25,7 +25,7 @@ $ErrorActionPreference = 'Stop'
 $script:IsEmbedded = $true
 
 # Embedded version information (injected by build script)
-$script:BoxerVersion = "0.1.53"
+$script:BoxerVersion = "0.1.54"
 
 # BEGIN boxing.ps1
 # Boxing - Common bootstrapper for boxer and box
@@ -713,7 +713,7 @@ function Get-InstalledBoxes {
         return @()
     }
 
-    $boxes = Get-ChildItem -Path $BoxesDir -Directory | Select-Object -ExpandProperty Name
+    $boxes = @(Get-ChildItem -Path $BoxesDir -Directory | Select-Object -ExpandProperty Name)
     return $boxes
 }
 
@@ -783,22 +783,25 @@ function Invoke-Boxer-Init {
         [Parameter(Position=1)]
         [string]$Path = "",
 
+        [Parameter(Position=2)]
+        [string]$Description = "",
+
         [string]$Box = ""
     )
 
     # FIRST: Detect if current directory is already a box project
     $CurrentDirIsBox = Test-Path (Join-Path (Get-Location) ".box")
-    
+
     # Determine target directory and update mode
     $IsUpdate = $false
     $TargetDir = ""
-    
+
     if (-not [string]::IsNullOrWhiteSpace($Path)) {
         # Path explicitly provided - resolve and check
         $TargetDir = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($Path)
         $BoxPath = Join-Path $TargetDir ".box"
         $IsUpdate = (Test-Path $TargetDir) -and (Test-Path $BoxPath)
-        
+
         # Error if directory exists but not a box project
         if ((Test-Path $TargetDir) -and -not $IsUpdate) {
             Write-Err "Directory '$TargetDir' exists but is not a Box project"
@@ -821,14 +824,19 @@ function Invoke-Boxer-Init {
             if ([string]::IsNullOrWhiteSpace($Name)) {
                 Write-Err "Project name is required"
                 return
-            }
-        }
-
         # Sanitize project name
         $SafeName = Sanitize-ProjectName -Name $Name
         if ([string]::IsNullOrWhiteSpace($SafeName)) {
             Write-Err "Invalid project name after sanitization"
             return
+        }
+
+        # Prompt for description if not provided
+        if ([string]::IsNullOrWhiteSpace($Description)) {
+            $Description = Read-Host "Description (optional)"
+        }
+
+        # Determine target directory
         }
 
         # Determine target directory
@@ -900,7 +908,7 @@ function Invoke-Boxer-Init {
             try {
                 $metadata = Import-PowerShellDataFile $BoxMetadataPath
                 $CurrentBoxName = $metadata.BoxName
-                
+
                 if ($CurrentBoxName -ne $SelectedBox) {
                     Write-Err "Cannot update: existing project uses '$CurrentBoxName', trying to init '$SelectedBox'"
                     Write-Host ""
@@ -1009,12 +1017,55 @@ function Invoke-Boxer-Init {
 
             # Create basic project structure
             Write-Step "Creating project structure..."
-            @('src', 'docs', 'scripts', 'vendor') | ForEach-Object {
+            @('src', 'docs', 'scripts') | ForEach-Object {
                 $dirPath = Join-Path $TargetDir $_
                 New-Item -ItemType Directory -Path $dirPath -Force | Out-Null
                 Track-Creation $dirPath 'directory'
             }
-            Write-Success "Created: src, docs, scripts, vendor"
+            Write-Success "Created: src, docs, scripts"
+
+            # Generate box.psd1 at root from template
+            Write-Step "Creating project config..."
+            $BoxPsd1Path = Join-Path $TargetDir "box.psd1"
+            $BoxPsd1Template = Join-Path $BoxPath "tpl\box.psd1.template"
+            if (Test-Path $BoxPsd1Template) {
+                $content = Get-Content $BoxPsd1Template -Raw -Encoding UTF8
+                $content = $content -replace '{{PROJECT_NAME}}', $Name
+                $content = $content -replace '{{DESCRIPTION}}', $Description
+                $content = $content -replace '{{PROGRAM_NAME}}', $Name
+                Set-Content -Path $BoxPsd1Path -Value $content -Encoding UTF8
+                Track-Creation $BoxPsd1Path 'file'
+                Write-Success "Created: box.psd1"
+            } else {
+                Write-Host "  ⚠ box.psd1.template not found, skipping" -ForegroundColor Yellow
+            }
+
+            # Generate src/main.c from template
+            $MainCPath = Join-Path $TargetDir "src\main.c"
+            $MainCTemplate = Join-Path $BoxPath "tpl\main.c.template"
+            if (Test-Path $MainCTemplate) {
+                $content = Get-Content $MainCTemplate -Raw -Encoding UTF8
+                $content = $content -replace '{{PROJECT_NAME}}', $Name
+                Set-Content -Path $MainCPath -Value $content -Encoding UTF8
+                Track-Creation $MainCPath 'file'
+                Write-Success "Created: src/main.c"
+            } else {
+                Write-Host "  ⚠ main.c.template not found, skipping" -ForegroundColor Yellow
+            }
+
+            # Generate .vscode/settings.json from template
+            $VSCodeDir = Join-Path $TargetDir ".vscode"
+            $VSCodeSettingsPath = Join-Path $VSCodeDir "settings.json"
+            $VSCodeTemplate = Join-Path $BoxPath "tpl\vscode-settings.json.template"
+            if (Test-Path $VSCodeTemplate) {
+                New-Item -ItemType Directory -Path $VSCodeDir -Force | Out-Null
+                Track-Creation $VSCodeDir 'directory'
+                Copy-Item -Path $VSCodeTemplate -Destination $VSCodeSettingsPath -Force
+                Track-Creation $VSCodeSettingsPath 'file'
+                Write-Success "Created: .vscode/settings.json"
+            } else {
+                Write-Host "  ⚠ vscode-settings.json.template not found, skipping" -ForegroundColor Yellow
+            }
 
             Write-Host ""
             Write-Success "Project created: $SafeName"
@@ -1022,7 +1073,7 @@ function Invoke-Boxer-Init {
             Write-Host "  Next steps:" -ForegroundColor Cyan
             Write-Host "    box install" -ForegroundColor White
             Write-Host ""
-            
+
             # Navigate to the new project directory
             Set-Location -Path $TargetDir
 
