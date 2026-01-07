@@ -6,8 +6,8 @@
     Standalone boxer.ps1 with embedded modules
 
 .NOTES
-    Build Date: 2026-01-08 00:33:45
-    Version: 0.1.64
+    Build Date: 2026-01-08 00:39:53
+    Version: 0.1.65
 #>
 
 param(
@@ -25,7 +25,7 @@ $ErrorActionPreference = 'Stop'
 $script:IsEmbedded = $true
 
 # Embedded version information (injected by build script)
-$script:BoxerVersion = "0.1.64"
+$script:BoxerVersion = "0.1.65"
 
 # BEGIN boxing.ps1
 # Boxing - Common bootstrapper for boxer and box
@@ -319,8 +319,7 @@ function Initialize-Boxing {
     }
 }
 
-# Export main entry point
-# Export-ModuleMember removed (compiled script)
+# Note: Export-ModuleMember removed - not needed in standalone scripts
 
 # END boxing.ps1
 
