@@ -6,8 +6,8 @@
     Standalone box.ps1 with embedded modules
 
 .NOTES
-    Build Date: 2026-01-07 00:51:04
-    Version: 0.1.44
+    Build Date: 2026-01-07 01:03:27
+    Version: 0.1.45
 #>
 
 param(
@@ -25,7 +25,7 @@ $ErrorActionPreference = 'Stop'
 # ============================================================================
 
 # Embedded version information (injected by build script)
-$script:BoxerVersion = "0.1.44"
+$script:BoxerVersion = "0.1.45"
 
 $BaseDir = Get-Location
 $BoxDir = $null
@@ -3186,7 +3186,7 @@ function Ask-Path {
 
 function Show-Help {
     Write-Host ""
-    Write-Host "Boxing - Reproducible Development Environment Manager" -ForegroundColor Cyan
+    Write-Host "Boxing - Reproducible Environment Manager" -ForegroundColor Cyan
     Write-Host ""
     Write-Host "Commands:" -ForegroundColor Yellow
     if ($script:Mode -eq 'boxer') {

@@ -6,8 +6,8 @@
     Standalone boxer.ps1 with embedded modules
 
 .NOTES
-    Build Date: 2026-01-07 00:51:04
-    Version: 0.1.44
+    Build Date: 2026-01-07 01:03:27
+    Version: 0.1.45
 #>
 
 param(
@@ -25,7 +25,7 @@ $ErrorActionPreference = 'Stop'
 $script:IsEmbedded = $true
 
 # Embedded version information (injected by build script)
-$script:BoxerVersion = "0.1.44"
+$script:BoxerVersion = "0.1.45"
 
 # BEGIN boxing.ps1
 # Boxing - Common bootstrapper for boxer and box
@@ -500,7 +500,7 @@ function Ask-Path {
 
 function Show-Help {
     Write-Host ""
-    Write-Host "Boxing - Reproducible Development Environment Manager" -ForegroundColor Cyan
+    Write-Host "Boxing - Reproducible Environment Manager" -ForegroundColor Cyan
     Write-Host ""
     Write-Host "Commands:" -ForegroundColor Yellow
     if ($script:Mode -eq 'boxer') {
@@ -717,6 +717,35 @@ function Get-InstalledBoxes {
     return $boxes
 }
 
+# Rollback tracking for error recovery
+$Script:CreatedItems = @()
+
+function Track-Creation {
+    param([string]$Path, [string]$Type = 'file')
+    $Script:CreatedItems += @{ Path = $Path; Type = $Type }
+}
+
+function Rollback-Creation {
+    Write-Host ''
+    Write-Step 'Rolling back changes...'
+
+    # Reverse order (newest first)
+    for ($i = $Script:CreatedItems.Count - 1; $i -ge 0; $i--) {
+        $item = $Script:CreatedItems[$i]
+        if (Test-Path $item.Path) {
+            try {
+                Remove-Item $item.Path -Recurse -Force -ErrorAction SilentlyContinue
+                Write-Success "Removed: $($item.Path)"
+            }
+            catch {
+                Write-Host "  ⚠ Could not remove: $($item.Path)" -ForegroundColor Yellow
+            }
+        }
+    }
+
+    $Script:CreatedItems = @()
+}
+
 function Invoke-Boxer-Init {
     <#
     .SYNOPSIS
@@ -843,10 +872,12 @@ function Invoke-Boxer-Init {
     try {
         # Create project directory
         New-Item -ItemType Directory -Path $TargetDir -Force | Out-Null
+        Track-Creation $TargetDir 'directory'
 
         # Create .box directory
         $BoxPath = Join-Path $TargetDir ".box"
         New-Item -ItemType Directory -Path $BoxPath -Force | Out-Null
+        Track-Creation $BoxPath 'directory'
 
         # Copy box files from Boxing\Boxes\{SelectedBox}\ to .box\
         $BoxingDir = "$env:USERPROFILE\Documents\PowerShell\Boxing"
@@ -865,6 +896,7 @@ function Invoke-Boxer-Init {
 
             $destPath = Join-Path $BoxPath $file.Name
             Copy-Item -Path $file.FullName -Destination $destPath -Force
+            Track-Creation $destPath 'file'
             Write-Success "Copied: $($file.Name)"
         }
 
@@ -873,6 +905,7 @@ function Invoke-Boxer-Init {
         if (Test-Path $SourceTplDir) {
             $DestTplDir = Join-Path $BoxPath "tpl"
             Copy-Item -Path $SourceTplDir -Destination $DestTplDir -Recurse -Force
+            Track-Creation $DestTplDir 'directory'
 
             $tplCount = (Get-ChildItem -Path $DestTplDir -File -Recurse).Count
             Write-Success "Copied: tpl/ ($tplCount templates)"
@@ -881,7 +914,9 @@ function Invoke-Boxer-Init {
         # Create basic project structure
         Write-Step "Creating project structure..."
         @('src', 'docs', 'scripts', 'vendor') | ForEach-Object {
-            New-Item -ItemType Directory -Path (Join-Path $TargetDir $_) -Force | Out-Null
+            $dirPath = Join-Path $TargetDir $_
+            New-Item -ItemType Directory -Path $dirPath -Force | Out-Null
+            Track-Creation $dirPath 'directory'
         }
         Write-Success "Created: src, docs, scripts, vendor"
 
@@ -894,10 +929,15 @@ function Invoke-Boxer-Init {
         Write-Host ""
 
     } catch {
-        Write-Err "Project creation failed: $_"
-        if (Test-Path $TargetDir) {
-            Remove-Item $TargetDir -Recurse -Force -ErrorAction SilentlyContinue
-        }
+        Write-Host ""
+        Write-Host "❌ Project creation failed: $_" -ForegroundColor Red
+        Write-Host ""
+        Write-Host "  Possible causes:" -ForegroundColor Yellow
+        Write-Host "    - Insufficient disk space" -ForegroundColor White
+        Write-Host "    - Permission denied" -ForegroundColor White
+        Write-Host "    - Path too long" -ForegroundColor White
+        Write-Host ""
+        Rollback-Creation
     }
 }
 
