@@ -6,8 +6,8 @@
     Standalone boxer.ps1 with embedded modules
 
 .NOTES
-    Build Date: 2026-01-07 01:03:27
-    Version: 0.1.45
+    Build Date: 2026-01-07 01:29:52
+    Version: 0.1.46
 #>
 
 param(
@@ -25,7 +25,7 @@ $ErrorActionPreference = 'Stop'
 $script:IsEmbedded = $true
 
 # Embedded version information (injected by build script)
-$script:BoxerVersion = "0.1.45"
+$script:BoxerVersion = "0.1.46"
 
 # BEGIN boxing.ps1
 # Boxing - Common bootstrapper for boxer and box
@@ -1015,17 +1015,12 @@ function Install-BoxingSystem {
             # If executed via irm|iex, $PSCommandPath is empty - download from GitHub
             if (-not $PSCommandPath -or -not (Test-Path $PSCommandPath)) {
                 $boxerUrl = "https://raw.githubusercontent.com/vbuzzano/AmiDevBox/main/boxer.ps1"
-                $initUrl = "https://raw.githubusercontent.com/vbuzzano/AmiDevBox/main/init.ps1"
 
                 try {
                     Invoke-RestMethod -Uri $boxerUrl -OutFile $BoxerPath
                     Write-Success "Downloaded: boxer.ps1"
-
-                    $InitPath = Join-Path $BoxingDir "init.ps1"
-                    Invoke-RestMethod -Uri $initUrl -OutFile $InitPath
-                    Write-Success "Downloaded: init.ps1"
                 } catch {
-                    throw "Failed to download boxer.ps1 from $boxerUrl : $_"
+                    throw "Failed to download boxer.ps1: $_"
                 }
             } else {
                 # Local installation (running from file)
@@ -1041,53 +1036,8 @@ function Install-BoxingSystem {
 }
 "@
             Set-Content -Path $BoxerMetadataPath -Value $BoxerMetadata -Encoding UTF8
-        }        # Modify PowerShell profile
-        Write-Step "Configuring PowerShell profile..."
 
-        # Create profile directory if needed
-        $ProfileDir = Split-Path $ProfilePath -Parent
-        if (-not (Test-Path $ProfileDir)) {
-            New-Item -ItemType Directory -Path $ProfileDir -Force | Out-Null
-        }
-
-        # Read existing profile or create empty
-        $ProfileContent = ""
-        if (Test-Path $ProfilePath) {
-            $ProfileContent = Get-Content $ProfilePath -Raw
-        }
-
-        # Check if #region boxing already exists
-        if ($ProfileContent -match '#region boxing') {
-            Write-Success "Profile already configured (skipping)"
-        } else {
-            # Add Boxing region to profile (lightweight dot-source approach)
-            $BoxingRegion = @"
-
-#region boxing
-`$boxingInit = "`$env:USERPROFILE\Documents\PowerShell\Boxing\init.ps1"
-if (Test-Path `$boxingInit) {
-    . `$boxingInit
-}
-#endregion boxing
-"@
-
-            # Append to profile
-            $ProfileContent += $BoxingRegion
-            Set-Content -Path $ProfilePath -Value $ProfileContent -Encoding UTF8
-            Write-Success "Profile configured with Boxing loader"
-        }
-
-        # Install box if this is a box repository (not Boxing main repo)
-        if ($SourceRepo) {
-            Install-CurrentBox -BoxName $SourceRepo -BoxingDir $BoxingDir
-        }
-
-        # Determine if we need to configure profile and load functions
-        $ProfileNeedsConfig = -not ($ProfileContent -match '#region boxing')
-        $FunctionsNeedLoading = $ProfileNeedsConfig -or -not (Get-Command -Name boxer -ErrorAction SilentlyContinue)
-
-        # Create/update init.ps1 only on first install or update
-        if (-not $BoxerAlreadyInstalled -or $NeedsUpdate) {
+            # Create/update init.ps1 alongside boxer.ps1
             $InitScript = @"
 # Boxing Session Loader
 # Run this to load boxer and box functions in current session without restarting PowerShell
@@ -1133,7 +1083,53 @@ Write-Host "✓ Boxing functions loaded (boxer, box)" -ForegroundColor Green
 "@
             $InitPath = Join-Path $BoxingDir "init.ps1"
             Set-Content -Path $InitPath -Value $InitScript -Encoding UTF8
+            Write-Success "Created: init.ps1"
         }
+
+        # Modify PowerShell profile
+        Write-Step "Configuring PowerShell profile..."
+
+        # Create profile directory if needed
+        $ProfileDir = Split-Path $ProfilePath -Parent
+        if (-not (Test-Path $ProfileDir)) {
+            New-Item -ItemType Directory -Path $ProfileDir -Force | Out-Null
+        }
+
+        # Read existing profile or create empty
+        $ProfileContent = ""
+        if (Test-Path $ProfilePath) {
+            $ProfileContent = Get-Content $ProfilePath -Raw
+        }
+
+        # Check if #region boxing already exists
+        if ($ProfileContent -match '#region boxing') {
+            Write-Success "Profile already configured (skipping)"
+        } else {
+            # Add Boxing region to profile (lightweight dot-source approach)
+            $BoxingRegion = @"
+
+#region boxing
+`$boxingInit = "`$env:USERPROFILE\Documents\PowerShell\Boxing\init.ps1"
+if (Test-Path `$boxingInit) {
+    . `$boxingInit
+}
+#endregion boxing
+"@
+
+            # Append to profile
+            $ProfileContent += $BoxingRegion
+            Set-Content -Path $ProfilePath -Value $ProfileContent -Encoding UTF8
+            Write-Success "Profile configured with Boxing loader"
+        }
+
+        # Install box if this is a box repository (not Boxing main repo)
+        if ($SourceRepo) {
+            Install-CurrentBox -BoxName $SourceRepo -BoxingDir $BoxingDir
+        }
+
+        # Determine if we need to load functions in current session
+        $ProfileNeedsConfig = -not ($ProfileContent -match '#region boxing')
+        $FunctionsNeedLoading = $ProfileNeedsConfig -or -not (Get-Command -Name boxer -ErrorAction SilentlyContinue)
 
         # Load functions in current session only if needed (profile not configured or function missing)
         if ($FunctionsNeedLoading) {
