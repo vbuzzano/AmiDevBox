@@ -6,8 +6,8 @@
     Standalone boxer.ps1 with embedded modules
 
 .NOTES
-    Build Date: 2026-01-07 01:29:52
-    Version: 0.1.46
+    Build Date: 2026-01-07 01:35:44
+    Version: 0.1.48
 #>
 
 param(
@@ -25,7 +25,7 @@ $ErrorActionPreference = 'Stop'
 $script:IsEmbedded = $true
 
 # Embedded version information (injected by build script)
-$script:BoxerVersion = "0.1.46"
+$script:BoxerVersion = "0.1.48"
 
 # BEGIN boxing.ps1
 # Boxing - Common bootstrapper for boxer and box
@@ -1018,7 +1018,7 @@ function Install-BoxingSystem {
 
                 try {
                     Invoke-RestMethod -Uri $boxerUrl -OutFile $BoxerPath
-                    Write-Success "Downloaded: boxer.ps1"
+                    Write-Success "Installed: boxer.ps1"
                 } catch {
                     throw "Failed to download boxer.ps1: $_"
                 }
@@ -1103,7 +1103,7 @@ Write-Host "✓ Boxing functions loaded (boxer, box)" -ForegroundColor Green
 
         # Check if #region boxing already exists
         if ($ProfileContent -match '#region boxing') {
-            Write-Success "Profile already configured (skipping)"
+            Write-Success "Profile ready"
         } else {
             # Add Boxing region to profile (lightweight dot-source approach)
             $BoxingRegion = @"
@@ -1119,7 +1119,7 @@ if (Test-Path `$boxingInit) {
             # Append to profile
             $ProfileContent += $BoxingRegion
             Set-Content -Path $ProfilePath -Value $ProfileContent -Encoding UTF8
-            Write-Success "Profile configured with Boxing loader"
+            Write-Success "Profile configured"
         }
 
         # Install box if this is a box repository (not Boxing main repo)
@@ -1286,7 +1286,8 @@ function Install-CurrentBox {
         Write-Step "Downloading box.ps1..."
         try {
             Invoke-RestMethod -Uri "$BaseUrl/box.ps1" -OutFile (Join-Path $BoxDir "box.ps1")
-            Write-Success "Downloaded: box.ps1"
+            $action = if ($InstalledVersion) { "Updated" } else { "Installed" }
+            Write-Success "${action}: box.ps1"
         } catch {
             throw "Failed to download box.ps1: $_"
         }
@@ -1295,7 +1296,8 @@ function Install-CurrentBox {
         Write-Step "Downloading config.psd1..."
         try {
             Invoke-RestMethod -Uri "$BaseUrl/config.psd1" -OutFile (Join-Path $BoxDir "config.psd1")
-            Write-Success "Downloaded: config.psd1"
+            $action = if ($InstalledVersion) { "Updated" } else { "Installed" }
+            Write-Success "${action}: config.psd1"
         } catch {
             Write-Warn "config.psd1 not found (optional)"
         }
@@ -1304,7 +1306,8 @@ function Install-CurrentBox {
         Write-Step "Downloading metadata.psd1..."
         try {
             Invoke-RestMethod -Uri "$BaseUrl/metadata.psd1" -OutFile (Join-Path $BoxDir "metadata.psd1")
-            Write-Success "Downloaded: metadata.psd1"
+            $action = if ($InstalledVersion) { "Updated" } else { "Installed" }
+            Write-Success "${action}: metadata.psd1"
         } catch {
             Write-Warn "metadata.psd1 not found (optional)"
         }
@@ -1313,7 +1316,8 @@ function Install-CurrentBox {
         Write-Step "Downloading env.ps1..."
         try {
             Invoke-RestMethod -Uri "$BaseUrl/env.ps1" -OutFile (Join-Path $BoxDir "env.ps1")
-            Write-Success "Downloaded: env.ps1"
+            $action = if ($InstalledVersion) { "Updated" } else { "Installed" }
+            Write-Success "${action}: env.ps1"
         } catch {
             Write-Warn "env.ps1 not found (optional)"
         }
@@ -1333,7 +1337,8 @@ function Install-CurrentBox {
                 if ($File.type -eq 'file') {
                     $FilePath = Join-Path $TplDir $File.name
                     Invoke-RestMethod -Uri $File.download_url -OutFile $FilePath
-                    Write-Success "Downloaded: tpl/$($File.name)"
+                    $action = if ($InstalledVersion) { "Updated" } else { "Installed" }
+                    Write-Success "${action}: tpl/$($File.name)"
                 }
             }
         } catch {
