@@ -6,8 +6,8 @@
     Standalone boxer.ps1 with embedded modules
 
 .NOTES
-    Build Date: 2026-01-08 00:26:06
-    Version: 0.1.63
+    Build Date: 2026-01-08 00:33:45
+    Version: 0.1.64
 #>
 
 param(
@@ -25,7 +25,7 @@ $ErrorActionPreference = 'Stop'
 $script:IsEmbedded = $true
 
 # Embedded version information (injected by build script)
-$script:BoxerVersion = "0.1.63"
+$script:BoxerVersion = "0.1.64"
 
 # BEGIN boxing.ps1
 # Boxing - Common bootstrapper for boxer and box
@@ -1053,18 +1053,23 @@ function Invoke-Boxer-Init {
                 Write-Host "  ⚠ main.c.template not found, skipping" -ForegroundColor Yellow
             }
 
-            # Generate .vscode/settings.json from template
+            # Generate .vscode/settings.json from template (only if not exists)
             $VSCodeDir = Join-Path $TargetDir ".vscode"
             $VSCodeSettingsPath = Join-Path $VSCodeDir "settings.json"
-            $VSCodeTemplate = Join-Path $BoxPath "tpl\vscode-settings.json.template"
-            if (Test-Path $VSCodeTemplate) {
-                New-Item -ItemType Directory -Path $VSCodeDir -Force | Out-Null
-                Track-Creation $VSCodeDir 'directory'
-                Copy-Item -Path $VSCodeTemplate -Destination $VSCodeSettingsPath -Force
-                Track-Creation $VSCodeSettingsPath 'file'
-                Write-Success "Created: .vscode/settings.json"
+            
+            if (-not (Test-Path $VSCodeSettingsPath)) {
+                $VSCodeTemplate = Join-Path $BoxPath "tpl\vscode-settings.json.template"
+                if (Test-Path $VSCodeTemplate) {
+                    New-Item -ItemType Directory -Path $VSCodeDir -Force | Out-Null
+                    Track-Creation $VSCodeDir 'directory'
+                    Copy-Item -Path $VSCodeTemplate -Destination $VSCodeSettingsPath
+                    Track-Creation $VSCodeSettingsPath 'file'
+                    Write-Success "Created: .vscode/settings.json"
+                } else {
+                    Write-Host "  ⚠ vscode-settings.json.template not found, skipping" -ForegroundColor Yellow
+                }
             } else {
-                Write-Host "  ⚠ vscode-settings.json.template not found, skipping" -ForegroundColor Yellow
+                Write-Success "Preserved: .vscode/settings.json (already exists)"
             }
 
             Write-Host ""
