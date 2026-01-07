@@ -6,8 +6,8 @@
     Standalone boxer.ps1 with embedded modules
 
 .NOTES
-    Build Date: 2026-01-07 02:00:58
-    Version: 0.1.52
+    Build Date: 2026-01-07 05:57:47
+    Version: 0.1.53
 #>
 
 param(
@@ -25,7 +25,7 @@ $ErrorActionPreference = 'Stop'
 $script:IsEmbedded = $true
 
 # Embedded version information (injected by build script)
-$script:BoxerVersion = "0.1.52"
+$script:BoxerVersion = "0.1.53"
 
 # BEGIN boxing.ps1
 # Boxing - Common bootstrapper for boxer and box
@@ -786,34 +786,64 @@ function Invoke-Boxer-Init {
         [string]$Box = ""
     )
 
-    # Prompt for name if not provided
-    if ([string]::IsNullOrWhiteSpace($Name)) {
-        $Name = Read-Host "Project name"
-        if ([string]::IsNullOrWhiteSpace($Name)) {
-            Write-Err "Project name is required"
+    # FIRST: Detect if current directory is already a box project
+    $CurrentDirIsBox = Test-Path (Join-Path (Get-Location) ".box")
+    
+    # Determine target directory and update mode
+    $IsUpdate = $false
+    $TargetDir = ""
+    
+    if (-not [string]::IsNullOrWhiteSpace($Path)) {
+        # Path explicitly provided - resolve and check
+        $TargetDir = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($Path)
+        $BoxPath = Join-Path $TargetDir ".box"
+        $IsUpdate = (Test-Path $TargetDir) -and (Test-Path $BoxPath)
+        
+        # Error if directory exists but not a box project
+        if ((Test-Path $TargetDir) -and -not $IsUpdate) {
+            Write-Err "Directory '$TargetDir' exists but is not a Box project"
+            Write-Host "  Remove the directory or choose a different path" -ForegroundColor Yellow
             return
         }
+    } elseif ($CurrentDirIsBox) {
+        # No path provided but current dir is a box → update current directory
+        $TargetDir = (Get-Location).Path
+        $IsUpdate = $true
     }
 
-    # Sanitize project name
-    $SafeName = Sanitize-ProjectName -Name $Name
-    if ([string]::IsNullOrWhiteSpace($SafeName)) {
-        Write-Err "Invalid project name after sanitization"
-        return
-    }
-
-    # Determine target directory
-    if ([string]::IsNullOrWhiteSpace($Path)) {
-        $TargetDir = Join-Path (Get-Location) $SafeName
+    # In update mode, extract name from existing directory
+    if ($IsUpdate) {
+        $SafeName = Split-Path -Leaf $TargetDir
     } else {
-        $TargetDir = $Path
+        # Creation mode - prompt for name if not provided
+        if ([string]::IsNullOrWhiteSpace($Name)) {
+            $Name = Read-Host "Project name"
+            if ([string]::IsNullOrWhiteSpace($Name)) {
+                Write-Err "Project name is required"
+                return
+            }
+        }
+
+        # Sanitize project name
+        $SafeName = Sanitize-ProjectName -Name $Name
+        if ([string]::IsNullOrWhiteSpace($SafeName)) {
+            Write-Err "Invalid project name after sanitization"
+            return
+        }
+
+        # Determine target directory
+        if ([string]::IsNullOrWhiteSpace($Path)) {
+            $TargetDir = Join-Path (Get-Location) $SafeName
+        } else {
+            $TargetDir = $Path
+        }
+
+        # Resolve to absolute path
+        $TargetDir = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($TargetDir)
     }
 
-    # Check if directory exists
-    if (Test-Path $TargetDir) {
-        Write-Err "Directory '$TargetDir' already exists"
-        return
-    }
+    # Update BoxPath for later use
+    $BoxPath = Join-Path $TargetDir ".box"
 
     # Get installed boxes
     $InstalledBoxes = Get-InstalledBoxes
@@ -863,81 +893,150 @@ function Invoke-Boxer-Init {
         }
     }
 
+    # Verify box compatibility for updates
+    if ($IsUpdate) {
+        $BoxMetadataPath = Join-Path $BoxPath "metadata.psd1"
+        if (Test-Path $BoxMetadataPath) {
+            try {
+                $metadata = Import-PowerShellDataFile $BoxMetadataPath
+                $CurrentBoxName = $metadata.BoxName
+                
+                if ($CurrentBoxName -ne $SelectedBox) {
+                    Write-Err "Cannot update: existing project uses '$CurrentBoxName', trying to init '$SelectedBox'"
+                    Write-Host ""
+                    Write-Host "  To change box type, create a new project" -ForegroundColor Yellow
+                    return
+                }
+            } catch {
+                Write-Host "  ⚠ Could not read box metadata, proceeding with update..." -ForegroundColor Yellow
+            }
+        }
+    }
+
     Write-Host ""
-    Write-Step "Creating project: $Name"
-    Write-Host "  Directory: $TargetDir" -ForegroundColor Gray
-    Write-Host "  Box: $SelectedBox" -ForegroundColor Gray
-    Write-Host ""
+    if ($IsUpdate) {
+        # UPDATE MODE
+        Write-Step "Updating project: $SafeName"
+        Write-Host "  Directory: $TargetDir" -ForegroundColor Gray
+        Write-Host "  Box: $SelectedBox" -ForegroundColor Gray
+        Write-Host ""
 
-    try {
-        # Create project directory
-        New-Item -ItemType Directory -Path $TargetDir -Force | Out-Null
-        Track-Creation $TargetDir 'directory'
+        try {
+            $BoxingDir = "$env:USERPROFILE\Documents\PowerShell\Boxing"
+            $SourceBoxDir = Join-Path (Join-Path $BoxingDir "Boxes") $SelectedBox
 
-        # Create .box directory
-        $BoxPath = Join-Path $TargetDir ".box"
-        New-Item -ItemType Directory -Path $BoxPath -Force | Out-Null
-        Track-Creation $BoxPath 'directory'
+            Write-Step "Updating box files..."
 
-        # Copy box files from Boxing\Boxes\{SelectedBox}\ to .box\
-        $BoxingDir = "$env:USERPROFILE\Documents\PowerShell\Boxing"
-        $SourceBoxDir = Join-Path (Join-Path $BoxingDir "Boxes") $SelectedBox
-
-        Write-Step "Copying box files..."
-
-        # Get all files in source box directory
-        $filesToCopy = Get-ChildItem -Path $SourceBoxDir -File
-
-        foreach ($file in $filesToCopy) {
-            # Skip boxer.ps1 (global only, not for projects)
-            if ($file.Name -eq "boxer.ps1") {
-                continue
+            # Update .box/ files
+            $filesToCopy = Get-ChildItem -Path $SourceBoxDir -File
+            foreach ($file in $filesToCopy) {
+                if ($file.Name -eq "boxer.ps1") { continue }
+                $destPath = Join-Path $BoxPath $file.Name
+                Copy-Item -Path $file.FullName -Destination $destPath -Force
+                Write-Success "Updated: $($file.Name)"
             }
 
-            $destPath = Join-Path $BoxPath $file.Name
-            Copy-Item -Path $file.FullName -Destination $destPath -Force
-            Track-Creation $destPath 'file'
-            Write-Success "Copied: $($file.Name)"
+            # Update tpl/
+            $SourceTplDir = Join-Path $SourceBoxDir "tpl"
+            if (Test-Path $SourceTplDir) {
+                $DestTplDir = Join-Path $BoxPath "tpl"
+                if (Test-Path $DestTplDir) {
+                    Remove-Item -Path $DestTplDir -Recurse -Force
+                }
+                Copy-Item -Path $SourceTplDir -Destination $DestTplDir -Recurse -Force
+                $tplCount = (Get-ChildItem -Path $DestTplDir -File -Recurse).Count
+                Write-Success "Updated: tpl/ ($tplCount templates)"
+            }
+
+            Write-Host ""
+            Write-Success "Project updated: $SafeName ($SelectedBox)"
+            Write-Host ""
+
+        } catch {
+            Write-Host ""
+            Write-Host "❌ Project update failed: $_" -ForegroundColor Red
+            Write-Host ""
         }
 
-        # Copy tpl/ directory recursively if it exists
-        $SourceTplDir = Join-Path $SourceBoxDir "tpl"
-        if (Test-Path $SourceTplDir) {
-            $DestTplDir = Join-Path $BoxPath "tpl"
-            Copy-Item -Path $SourceTplDir -Destination $DestTplDir -Recurse -Force
-            Track-Creation $DestTplDir 'directory'
+    } else {
+        # CREATION MODE
+        Write-Step "Creating project: $SafeName"
+        Write-Host "  Directory: $TargetDir" -ForegroundColor Gray
+        Write-Host "  Box: $SelectedBox" -ForegroundColor Gray
+        Write-Host ""
 
-            $tplCount = (Get-ChildItem -Path $DestTplDir -File -Recurse).Count
-            Write-Success "Copied: tpl/ ($tplCount templates)"
+        try {
+            # Create project directory
+            New-Item -ItemType Directory -Path $TargetDir -Force | Out-Null
+            Track-Creation $TargetDir 'directory'
+
+            # Create .box directory
+            $BoxPath = Join-Path $TargetDir ".box"
+            New-Item -ItemType Directory -Path $BoxPath -Force | Out-Null
+            Track-Creation $BoxPath 'directory'
+
+            # Copy box files from Boxing\Boxes\{SelectedBox}\ to .box\
+            $BoxingDir = "$env:USERPROFILE\Documents\PowerShell\Boxing"
+            $SourceBoxDir = Join-Path (Join-Path $BoxingDir "Boxes") $SelectedBox
+
+            Write-Step "Copying box files..."
+
+            # Get all files in source box directory
+            $filesToCopy = Get-ChildItem -Path $SourceBoxDir -File
+
+            foreach ($file in $filesToCopy) {
+                # Skip boxer.ps1 (global only, not for projects)
+                if ($file.Name -eq "boxer.ps1") {
+                    continue
+                }
+
+                $destPath = Join-Path $BoxPath $file.Name
+                Copy-Item -Path $file.FullName -Destination $destPath -Force
+                Track-Creation $destPath 'file'
+                Write-Success "Copied: $($file.Name)"
+            }
+
+            # Copy tpl/ directory recursively if it exists
+            $SourceTplDir = Join-Path $SourceBoxDir "tpl"
+            if (Test-Path $SourceTplDir) {
+                $DestTplDir = Join-Path $BoxPath "tpl"
+                Copy-Item -Path $SourceTplDir -Destination $DestTplDir -Recurse -Force
+                Track-Creation $DestTplDir 'directory'
+
+                $tplCount = (Get-ChildItem -Path $DestTplDir -File -Recurse).Count
+                Write-Success "Copied: tpl/ ($tplCount templates)"
+            }
+
+            # Create basic project structure
+            Write-Step "Creating project structure..."
+            @('src', 'docs', 'scripts', 'vendor') | ForEach-Object {
+                $dirPath = Join-Path $TargetDir $_
+                New-Item -ItemType Directory -Path $dirPath -Force | Out-Null
+                Track-Creation $dirPath 'directory'
+            }
+            Write-Success "Created: src, docs, scripts, vendor"
+
+            Write-Host ""
+            Write-Success "Project created: $SafeName"
+            Write-Host ""
+            Write-Host "  Next steps:" -ForegroundColor Cyan
+            Write-Host "    box install" -ForegroundColor White
+            Write-Host ""
+            
+            # Navigate to the new project directory
+            Set-Location -Path $TargetDir
+
+        } catch {
+            Write-Host ""
+            Write-Host "❌ Project creation failed: $_" -ForegroundColor Red
+            Write-Host ""
+            Write-Host "  Possible causes:" -ForegroundColor Yellow
+            Write-Host "    - Insufficient disk space" -ForegroundColor White
+            Write-Host "    - Permission denied" -ForegroundColor White
+            Write-Host "    - Path too long" -ForegroundColor White
+            Write-Host ""
+            Rollback-Creation
         }
-
-        # Create basic project structure
-        Write-Step "Creating project structure..."
-        @('src', 'docs', 'scripts', 'vendor') | ForEach-Object {
-            $dirPath = Join-Path $TargetDir $_
-            New-Item -ItemType Directory -Path $dirPath -Force | Out-Null
-            Track-Creation $dirPath 'directory'
-        }
-        Write-Success "Created: src, docs, scripts, vendor"
-
-        Write-Host ""
-        Write-Success "Project created: $SafeName"
-        Write-Host ""
-        Write-Host "  Next steps:" -ForegroundColor Cyan
-        Write-Host "    cd $SafeName" -ForegroundColor White
-        Write-Host "    box install" -ForegroundColor White
-        Write-Host ""
-
-    } catch {
-        Write-Host ""
-        Write-Host "❌ Project creation failed: $_" -ForegroundColor Red
-        Write-Host ""
-        Write-Host "  Possible causes:" -ForegroundColor Yellow
-        Write-Host "    - Insufficient disk space" -ForegroundColor White
-        Write-Host "    - Permission denied" -ForegroundColor White
-        Write-Host "    - Path too long" -ForegroundColor White
-        Write-Host ""
-        Rollback-Creation
     }
 }
 

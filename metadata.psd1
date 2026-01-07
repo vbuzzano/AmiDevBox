@@ -2,11 +2,12 @@
     BoxName = "AmiDevBox"
     BoxType = "dev"
     BuildDate = "2026-01-07"
-    Version = "0.1.42"
-    BoxerVersion = "0.1.52"  # Updated by dist.ps1 from boxer.ps1
+    Version = "0.1.43"
+    BoxerVersion = "0.1.53"  # Updated by dist.ps1 from boxer.ps1
     Author = "Vincent Buzzano"
     Tags = @("amiga", "vbcc", "68k", "development")
 }
+
 
 
 
