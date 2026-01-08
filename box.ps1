@@ -6,8 +6,8 @@
     Standalone box.ps1 with embedded modules
 
 .NOTES
-    Build Date: 2026-01-08 00:39:53
-    Version: 0.1.65
+    Build Date: 2026-01-08 01:52:06
+    Version: 0.1.68
 #>
 
 param(
@@ -25,7 +25,7 @@ $ErrorActionPreference = 'Stop'
 # ============================================================================
 
 # Embedded version information (injected by build script)
-$script:BoxerVersion = "0.1.65"
+$script:BoxerVersion = "0.1.68"
 
 $BaseDir = Get-Location
 $BoxDir = $null
@@ -953,44 +953,13 @@ function Merge-Config {
 # END core/config.ps1
 # BEGIN core/constants.ps1
 # ============================================================================
-# Constants and helper functions for inc/ modules
-# ============================================================================
-# This file provides small helpers to avoid repeating filenames and to allow
-# dot-sourcing inc files without typing the .ps1 extension everywhere.
+# Constants
 # ============================================================================
 
-# Expected: $IncDir is set by the caller (functions.ps1 loader)
-
-# Common filenames (can be referenced by other scripts)
+# Common filenames
 $script:ConfigFileName = 'config.psd1'
 $script:UserConfigFileName = 'box.config.psd1'
 $script:MakefileTemplateName = '.box/tpl/Makefile.template'
-
-function Get-IncPath {
-    param([string]$Name)
-    if (-not $script:IncDir) {
-        throw "Get-IncPath: `$script:IncDir is not set"
-    }
-    return Join-Path $script:IncDir ("$Name.ps1")
-}
-
-function Source-Inc {
-    param([string]$Name)
-    $path = Get-IncPath $Name
-    if (-not (Test-Path $path)) {
-        throw "Source-Inc: file not found: $path"
-    }
-    . $path
-}
-
-# Convenience: dot-source by relative path without extension
-function Source-Rel {
-    param([string]$RelativePath)
-    $full = Join-Path $script:IncDir $RelativePath
-    if (-not $full.EndsWith('.ps1')) { $full += '.ps1' }
-    if (-not (Test-Path $full)) { throw "Source-Rel: not found: $full" }
-    . $full
-}
 
 # END core/constants.ps1
 # BEGIN core/directories.ps1
@@ -1842,40 +1811,6 @@ function Ask-ManualEnvs {
 }
 
 # END core/extract.ps1
-# BEGIN core/functions.ps1
-# ============================================================================
-# AmigaDevBox - Box Functions Loader
-# ============================================================================
-# This file loads all modular function files
-# DO NOT MODIFY - changes will be overwritten on updates
-# ============================================================================
-
-# Determine inc directory. Prefer $BoxDir if provided by the caller,
-# otherwise fall back to script location.
-if ($BoxDir) {
-    $script:IncDir = Join-Path $BoxDir "inc"
-} else {
-    $script:IncDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-}
-
-# Load all modules directly (dot-source must be at script level, not inside a function)
-. "$script:IncDir\constants.ps1"
-. "$script:IncDir\common.ps1"
-. "$script:IncDir\sevenzip.ps1"
-. "$script:IncDir\download.ps1"
-. "$script:IncDir\extract.ps1"
-. "$script:IncDir\makefile.ps1"
-. "$script:IncDir\envs.ps1"
-. "$script:IncDir\packages.ps1"
-. "$script:IncDir\directories.ps1"
-. "$script:IncDir\ui.ps1"
-. "$script:IncDir\help.ps1"
-. "$script:IncDir\wizard.ps1"
-. "$script:IncDir\templates.ps1"
-. "$script:IncDir\commands.ps1"
-
-
-# END core/functions.ps1
 # BEGIN core/help.ps1
 # ============================================================================
 # Help Functions
@@ -1903,127 +1838,6 @@ function Show-Help {
 }
 
 # END core/help.ps1
-# BEGIN core/init.ps1
-# ============================================================================
-# AmigaDevBox - Initialization Module
-# ============================================================================
-# This file handles all box initialization: paths, configs, and functions.
-# Dot-source this from box.ps1 to keep the main script clean.
-# ============================================================================
-
-# ============================================================================
-# Constants (local to init, no $script: needed)
-# ============================================================================
-
-$CONFIG_FILENAME = 'config.psd1'
-$USER_CONFIG_FILENAME = 'box.config.psd1'
-$STATE_FILENAME = '.box/state.json'
-$FUNCTIONS_LOADER = 'inc\functions.ps1'
-
-# ============================================================================
-# Derived Paths (BaseDir and BoxDir are set by caller)
-# ============================================================================
-
-$script:StateFile = Join-Path $BaseDir $STATE_FILENAME
-$script:EnvFile = Join-Path $BaseDir ".env"
-
-# ============================================================================
-# Load Functions (before config loading - needed for Merge-Config)
-# ============================================================================
-
-$script:FunctionsLoader = Join-Path $BoxDir $FUNCTIONS_LOADER
-if (-not (Test-Path $FunctionsLoader)) {
-    Write-Host "Functions loader not found: $FunctionsLoader" -ForegroundColor Red
-    exit 1
-}
-. $FunctionsLoader
-
-# ============================================================================
-# Configuration Loading
-# ============================================================================
-
-# Load system config
-$script:SysConfigFile = Join-Path $BoxDir $CONFIG_FILENAME
-if (-not (Test-Path $SysConfigFile)) {
-    Write-Host "$CONFIG_FILENAME not found in .box/" -ForegroundColor Red
-    exit 1
-}
-$script:SysConfig = Import-PowerShellDataFile $SysConfigFile
-
-# User config
-$script:UserConfigFile = Join-Path $BaseDir $USER_CONFIG_FILENAME
-$script:UserConfigTemplate = Join-Path $BaseDir $SysConfig.UserConfigTemplate
-
-# Project config (box.psd1 at root, created by devbox init)
-$script:ProjectConfigFile = Join-Path $BaseDir 'box.psd1'
-
-# Handle missing user config based on command
-$script:SkipExecution = $false
-$script:StateExists = Test-Path (Join-Path $BaseDir $STATE_FILENAME)
-
-# Commands that require state (not install, not help)
-if ($BoxCommand -in @("uninstall", "env", "pkg")) {
-    if (-not $StateExists) {
-        Write-Host ""
-        Write-Host "No configuration found." -ForegroundColor Red
-        Write-Host "Run 'box' or 'box install' first." -ForegroundColor Gray
-        Write-Host ""
-        $script:SkipExecution = $true
-    }
-}
-
-# Load config if not skipping
-if (-not $SkipExecution) {
-    # Load project config if exists
-    $script:ProjectConfig = @{}
-    if (Test-Path $ProjectConfigFile) {
-        $script:ProjectConfig = Import-PowerShellDataFile $ProjectConfigFile
-    }
-
-    if (Test-Path $UserConfigFile) {
-        $script:UserConfig = Import-PowerShellDataFile $UserConfigFile
-        $script:Config = Merge-Config -SysConfig $SysConfig -UserConfig $UserConfig
-        # Merge project config into $Config (using Merge-Hashtable for arrays concatenation)
-        $script:Config = Merge-Hashtable -Base $Config -Override $ProjectConfig
-    }
-    elseif ($BoxCommand -eq "install" -or $BoxCommand -eq "") {
-        # install: will run wizard later in Invoke-Install
-        $script:UserConfig = @{}
-        $script:Config = $SysConfig
-        # Merge project config (using Merge-Hashtable for arrays concatenation)
-        $script:Config = Merge-Hashtable -Base $Config -Override $ProjectConfig
-        $script:NeedsWizard = $true
-    }
-    else {
-        # Other commands without config but with state - use minimal config
-        $script:UserConfig = @{}
-        $script:Config = $SysConfig
-    }
-}
-
-# ============================================================================
-# Derived Paths (from merged config)
-# ============================================================================
-
-# Cache path (with override support)
-$script:CacheDir = if ($Config.CachePath) {
-    if ([System.IO.Path]::IsPathRooted($Config.CachePath)) { $Config.CachePath }
-    else { Join-Path $BaseDir $Config.CachePath }
-} else {
-    Join-Path $BaseDir $Config.BoxPaths.Cache
-}
-$script:DownloadsDir = $CacheDir
-$script:TempDir = Join-Path $CacheDir "temp"
-$script:BoxToolsDir = Join-Path $BaseDir $Config.BoxPaths.Tools
-
-# 7-Zip paths
-$script:SevenZipExe = Join-Path $BoxToolsDir "7z.exe"
-$script:SevenZipDll = Join-Path $BoxToolsDir "7z.dll"
-
-# All packages (merged - UserConfig.Packages first for priority)
-$script:AllPackages = if ($Config.Packages) { $Config.Packages } else { @() }
-
-# END core/init.ps1
 # BEGIN core/makefile.ps1
 # ============================================================================
 # Makefile Generation Functions
