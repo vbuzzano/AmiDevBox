@@ -6,8 +6,8 @@
     Standalone boxer.ps1 with embedded modules
 
 .NOTES
-    Build Date: 2026-01-08 02:32:44
-    Version: 0.1.70
+    Build Date: 2026-01-08 04:38:01
+    Version: 0.1.71
 #>
 
 param(
@@ -25,7 +25,7 @@ $ErrorActionPreference = 'Stop'
 $script:IsEmbedded = $true
 
 # Embedded version information (injected by build script)
-$script:BoxerVersion = "0.1.70"
+$script:BoxerVersion = "0.1.71"
 
 # BEGIN boxing.ps1
 # Boxing - Common bootstrapper for boxer and box
@@ -157,6 +157,8 @@ function Register-EmbeddedCommands {
         $script:Commands['clean'] = 'Invoke-Box-Clean'
         $script:Commands['status'] = 'Invoke-Box-Status'
         $script:Commands['uninstall'] = 'Invoke-Box-Uninstall'
+        $script:Commands['load'] = 'Invoke-Box-Load'
+        $script:Commands['info'] = 'Invoke-Box-Info'
         $script:Commands['version'] = 'Invoke-Box-Version'
     }
 }

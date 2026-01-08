@@ -6,8 +6,8 @@
     Standalone box.ps1 with embedded modules
 
 .NOTES
-    Build Date: 2026-01-08 02:32:44
-    Version: 0.1.70
+    Build Date: 2026-01-08 04:38:01
+    Version: 0.1.71
 #>
 
 param(
@@ -25,7 +25,7 @@ $ErrorActionPreference = 'Stop'
 # ============================================================================
 
 # Embedded version information (injected by build script)
-$script:BoxerVersion = "0.1.70"
+$script:BoxerVersion = "0.1.71"
 
 $BaseDir = Get-Location
 $BoxDir = $null
@@ -186,6 +186,8 @@ function Register-EmbeddedCommands {
         $script:Commands['clean'] = 'Invoke-Box-Clean'
         $script:Commands['status'] = 'Invoke-Box-Status'
         $script:Commands['uninstall'] = 'Invoke-Box-Uninstall'
+        $script:Commands['load'] = 'Invoke-Box-Load'
+        $script:Commands['info'] = 'Invoke-Box-Info'
         $script:Commands['version'] = 'Invoke-Box-Version'
     }
 }
@@ -3169,6 +3171,79 @@ function Invoke-Box-Clean {
 }
 
 # END modules/box/clean.ps1
+# BEGIN modules/box/info.ps1
+# Box Info Command
+# Display detailed information for current box workspace
+
+function Invoke-Box-Info {
+    Write-Host ""
+    Write-Host "Box Workspace Information" -ForegroundColor Cyan
+    Write-Host ("=" * 60) -ForegroundColor DarkGray
+    Write-Host ""
+
+    # Detect box.ps1 version (from embedded variable)
+    $BoxVersion = if ($script:BoxerVersion) {
+        $script:BoxerVersion
+    } else {
+        "Unknown"
+    }
+
+    Write-Host "Box Runtime:" -ForegroundColor Yellow
+    Write-Host "  Version: $BoxVersion" -ForegroundColor Gray
+    Write-Host ""
+
+    # Read box metadata
+    if ($script:BoxDir) {
+        $metadataFile = Join-Path $script:BoxDir "metadata.psd1"
+
+        if (Test-Path $metadataFile) {
+            try {
+                $metadata = Import-PowerShellDataFile -Path $metadataFile
+
+                Write-Host "Box Information:" -ForegroundColor Yellow
+                Write-Host "  Name:         $($metadata.BoxName)" -ForegroundColor Gray
+                Write-Host "  Version:      $($metadata.Version)" -ForegroundColor Gray
+
+                if ($metadata.BoxerVersion) {
+                    Write-Host "  Core Version: $($metadata.BoxerVersion)" -ForegroundColor Gray
+                }
+
+                if ($metadata.BuildDate) {
+                    Write-Host "  Build Date:   $($metadata.BuildDate)" -ForegroundColor Gray
+                }
+
+                if ($metadata.BoxType) {
+                    Write-Host "  Type:         $($metadata.BoxType)" -ForegroundColor Gray
+                }
+
+                if ($metadata.Author) {
+                    Write-Host "  Author:       $($metadata.Author)" -ForegroundColor Gray
+                }
+
+                if ($metadata.Tags) {
+                    Write-Host "  Tags:         $($metadata.Tags -join ', ')" -ForegroundColor Gray
+                }
+
+                Write-Host ""
+            } catch {
+                Write-Host "Error reading metadata: $_" -ForegroundColor Red
+                Write-Host ""
+            }
+        } else {
+            Write-Host "No metadata.psd1 found in .box directory" -ForegroundColor Yellow
+            Write-Host ""
+        }
+    }
+
+    # Workspace info
+    if ($script:BaseDir) {
+        Write-Host "Workspace:" -ForegroundColor Yellow
+        Write-Host "  Location: $script:BaseDir" -ForegroundColor Gray
+        Write-Host ""
+    }
+}
+
+# END modules/box/info.ps1
 # BEGIN modules/box/install.ps1
 # ============================================================================
 # Box Install Module
@@ -3408,74 +3483,16 @@ function Invoke-Box-Uninstall {
 # END modules/box/uninstall.ps1
 # BEGIN modules/box/version.ps1
 # Box Version Command
-# Display version information for current box workspace
+# Display box runtime version (simple output like boxer version)
 
 function Invoke-Box-Version {
-    Write-Host ""
-    Write-Host "Box Workspace Version Information" -ForegroundColor Cyan
-    Write-Host ("=" * 60) -ForegroundColor DarkGray
-    Write-Host ""
-
-    # Detect box.ps1 version (from embedded variable)
     $BoxVersion = if ($script:BoxerVersion) {
         $script:BoxerVersion
     } else {
         "Unknown"
     }
 
-    Write-Host "Box Runtime:" -ForegroundColor Yellow
-    Write-Host "  Version: $BoxVersion" -ForegroundColor Gray
-    Write-Host ""
-
-    # Read box metadata
-    if ($script:BoxDir) {
-        $metadataFile = Join-Path $script:BoxDir "metadata.psd1"
-
-        if (Test-Path $metadataFile) {
-            try {
-                $metadata = Import-PowerShellDataFile -Path $metadataFile
-
-                Write-Host "Box Information:" -ForegroundColor Yellow
-                Write-Host "  Name:         $($metadata.BoxName)" -ForegroundColor Gray
-                Write-Host "  Version:      $($metadata.Version)" -ForegroundColor Gray
-
-                if ($metadata.BoxerVersion) {
-                    Write-Host "  Core Version: $($metadata.BoxerVersion)" -ForegroundColor Gray
-                }
-
-                if ($metadata.BuildDate) {
-                    Write-Host "  Build Date:   $($metadata.BuildDate)" -ForegroundColor Gray
-                }
-
-                if ($metadata.BoxType) {
-                    Write-Host "  Type:         $($metadata.BoxType)" -ForegroundColor Gray
-                }
-
-                if ($metadata.Author) {
-                    Write-Host "  Author:       $($metadata.Author)" -ForegroundColor Gray
-                }
-
-                if ($metadata.Tags) {
-                    Write-Host "  Tags:         $($metadata.Tags -join ', ')" -ForegroundColor Gray
-                }
-
-                Write-Host ""
-            } catch {
-                Write-Host "Error reading metadata: $_" -ForegroundColor Red
-                Write-Host ""
-            }
-        } else {
-            Write-Host "No metadata.psd1 found in .box directory" -ForegroundColor Yellow
-            Write-Host ""
-        }
-    }
-
-    # Workspace info
-    if ($script:BaseDir) {
-        Write-Host "Workspace:" -ForegroundColor Yellow
-        Write-Host "  Location: $script:BaseDir" -ForegroundColor Gray
-        Write-Host ""
-    }
+    Write-Host "Box v$BoxVersion" -ForegroundColor Cyan
 }
 
 # END modules/box/version.ps1
@@ -3854,7 +3871,8 @@ function Remove-Package {
 # ============================================================================
 
 if (-not $Command) {
-    $Command = "install"
+    Show-Help
+    exit 0
 }
 
 switch ($Command) {
@@ -3864,10 +3882,11 @@ switch ($Command) {
     "clean" { Invoke-Box-Clean }
     "status" { Invoke-Box-Status }
     "load" { Invoke-Box-Load }
+    "info" { Invoke-Box-Info }
     "version" { Invoke-Box-Version }
     default {
         Write-Host "Unknown command: $Command" -ForegroundColor Red
-        Write-Host "Available: install, uninstall, env, clean, status, load, version" -ForegroundColor Gray
+        Write-Host "Available: install, uninstall, env, clean, status, load, info, version" -ForegroundColor Gray
         exit 1
     }
 }
