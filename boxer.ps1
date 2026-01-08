@@ -6,8 +6,8 @@
     Standalone boxer.ps1 with embedded modules
 
 .NOTES
-    Build Date: 2026-01-08 01:52:06
-    Version: 0.1.68
+    Build Date: 2026-01-08 02:31:08
+    Version: 0.1.69
 #>
 
 param(
@@ -25,7 +25,7 @@ $ErrorActionPreference = 'Stop'
 $script:IsEmbedded = $true
 
 # Embedded version information (injected by build script)
-$script:BoxerVersion = "0.1.68"
+$script:BoxerVersion = "0.1.69"
 
 # BEGIN boxing.ps1
 # Boxing - Common bootstrapper for boxer and box
@@ -318,8 +318,6 @@ function Initialize-Boxing {
         return 1
     }
 }
-
-# Note: Export-ModuleMember removed - not needed in standalone scripts
 
 # END boxing.ps1
 
@@ -1055,7 +1053,7 @@ function Invoke-Boxer-Init {
             # Generate .vscode/settings.json from template (only if not exists)
             $VSCodeDir = Join-Path $TargetDir ".vscode"
             $VSCodeSettingsPath = Join-Path $VSCodeDir "settings.json"
-            
+
             if (-not (Test-Path $VSCodeSettingsPath)) {
                 $VSCodeTemplate = Join-Path $BoxPath "tpl\vscode-settings.json.template"
                 if (Test-Path $VSCodeTemplate) {
@@ -1472,12 +1470,12 @@ function Install-CurrentBox {
         # Download tpl/ directory (FILES ONLY, no subdirectories)
         Write-Step "Downloading templates..."
         $TplDir = Join-Path $BoxDir "tpl"
-        
+
         # Clean tpl directory if updating (remove old files)
         if (Test-Path $TplDir) {
             Remove-Item -Path $TplDir -Recurse -Force
         }
-        
+
         New-Item -ItemType Directory -Path $TplDir -Force | Out-Null
 
         # Use GitHub API to list tpl/ contents
