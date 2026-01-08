@@ -6,8 +6,8 @@
     Standalone box.ps1 with embedded modules
 
 .NOTES
-    Build Date: 2026-01-08 02:31:08
-    Version: 0.1.69
+    Build Date: 2026-01-08 02:32:44
+    Version: 0.1.70
 #>
 
 param(
@@ -25,7 +25,7 @@ $ErrorActionPreference = 'Stop'
 # ============================================================================
 
 # Embedded version information (injected by build script)
-$script:BoxerVersion = "0.1.69"
+$script:BoxerVersion = "0.1.70"
 
 $BaseDir = Get-Location
 $BoxDir = $null
@@ -1859,42 +1859,6 @@ function Setup-Makefile {
 }
 
 # END core/makefile.ps1
-# BEGIN core/packages.ps1
-# ============================================================================
-# Package Management Shim
-# ============================================================================
-#
-# This file is a shim that redirects to the modular pkg module.
-# All package functions are now in modules/shared/pkg/*.ps1
-#
-# Module structure:
-# - modules/shared/pkg/metadata.psd1     - Module definition
-# - modules/shared/pkg/state.ps1         - State management (6 functions)
-# - modules/shared/pkg/extraction.ps1    - Extraction logic (7 functions)
-# - modules/shared/pkg/dependencies.ps1  - Dependency validation (2 functions)
-# - modules/shared/pkg/install.ps1       - Installation (1 function)
-# - modules/shared/pkg/uninstall.ps1     - Uninstallation (1 function)
-# - modules/shared/pkg/list.ps1          - Package listing (1 function)
-#
-# This shim exists for backward compatibility during the transition.
-# Once all callers are updated to use the pkg module directly,
-# this file can be removed.
-
-Write-Warn "core/packages.ps1 is deprecated. Use modules/shared/pkg/*.ps1 instead."
-
-# Load pkg module functions for backward compatibility
-$pkgModulePath = Join-Path (Split-Path $PSScriptRoot -Parent) "modules\shared\pkg"
-
-if (Test-Path $pkgModulePath) {
-    # Load all pkg module files
-    Get-ChildItem -Path $pkgModulePath -Filter *.ps1 -Recurse | ForEach-Object {
-        . $_.FullName
-    }
-} else {
-    Write-Error "Package module not found: $pkgModulePath"
-}
-
-# END core/packages.ps1
 # BEGIN core/sevenzip.ps1
 # ============================================================================
 # 7-Zip Setup
@@ -3899,9 +3863,11 @@ switch ($Command) {
     "env" { Invoke-Box-Env -Sub ($Arguments[0]) }
     "clean" { Invoke-Box-Clean }
     "status" { Invoke-Box-Status }
+    "load" { Invoke-Box-Load }
+    "version" { Invoke-Box-Version }
     default {
         Write-Host "Unknown command: $Command" -ForegroundColor Red
-        Write-Host "Available: install, uninstall, env, clean, status" -ForegroundColor Gray
+        Write-Host "Available: install, uninstall, env, clean, status, load, version" -ForegroundColor Gray
         exit 1
     }
 }
