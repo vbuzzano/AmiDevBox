@@ -6,8 +6,8 @@
     Standalone boxer.ps1 with embedded modules
 
 .NOTES
-    Build Date: 2026-01-12 21:29:25
-    Version: 0.1.84
+    Build Date: 2026-01-12 23:28:17
+    Version: 0.1.87
 #>
 
 param(
@@ -25,7 +25,7 @@ $ErrorActionPreference = 'Stop'
 $script:IsEmbedded = $true
 
 # Embedded version information (injected by build script)
-$script:BoxerVersion = "0.1.84"
+$script:BoxerVersion = "0.1.87"
 
 # BEGIN boxing.ps1
 # Boxing - Common bootstrapper for boxer and box
@@ -1341,21 +1341,25 @@ Write-Host "✓ Boxing functions loaded (boxer, box)" -ForegroundColor Green
 
                 & $boxScript @args
             }
+            
+            Write-Success "✓ Boxing functions loaded (boxer, box)"
         }
 
         # Display appropriate completion message
         if (-not $BoxerAlreadyInstalled) {
             # First installation
-            Write-Success "✓ Boxing functions loaded (boxer, box)"
             Write-Success "Boxing system installed successfully!"
             Write-Host ""
             Write-Host "  Ready to use! Try:" -ForegroundColor Cyan
             Write-Host "    boxer init MyProject" -ForegroundColor White
             Write-Host ""
-            Write-Host "  💡 Recommended: Restart PowerShell for permanent installation" -ForegroundColor Yellow
-            Write-Host "     (functions work now, but restart ensures they persist)" -ForegroundColor DarkGray
+        } else {
+            # Update completed
+            Write-Host ""
+            Write-Host "  ✓ Boxer updated successfully!" -ForegroundColor Green
+            Write-Host "  Ready to use: boxer init MyProject" -ForegroundColor Cyan
+            Write-Host ""
         }
-        # Update or already up-to-date: no additional message needed
 
     } catch {
         Write-Host "Installation failed: $_" -ForegroundColor Red
