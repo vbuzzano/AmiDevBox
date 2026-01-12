@@ -6,8 +6,8 @@
     Standalone boxer.ps1 with embedded modules
 
 .NOTES
-    Build Date: 2026-01-08 04:38:01
-    Version: 0.1.71
+    Build Date: 2026-01-12 21:24:24
+    Version: 0.1.82
 #>
 
 param(
@@ -25,7 +25,7 @@ $ErrorActionPreference = 'Stop'
 $script:IsEmbedded = $true
 
 # Embedded version information (injected by build script)
-$script:BoxerVersion = "0.1.71"
+$script:BoxerVersion = "0.1.82"
 
 # BEGIN boxing.ps1
 # Boxing - Common bootstrapper for boxer and box
@@ -54,6 +54,12 @@ if (-not (Get-Variable -Name IsEmbedded -Scope Script -ErrorAction SilentlyConti
 
 # Detect execution mode
 function Initialize-Mode {
+    # If mode already set (by embedded script), use it
+    if ($script:Mode) {
+        Write-Verbose "Mode already set: $script:Mode"
+        return $script:Mode
+    }
+
     # When executed via irm|iex, $MyInvocation.PSCommandPath is empty
     # In this case, default to 'boxer' mode for installation
     if (-not $MyInvocation.PSCommandPath) {
@@ -115,24 +121,57 @@ function Import-ModeModules {
         return
     }
 
-    $modulesPath = Join-Path $script:BoxingRoot "modules\$Mode"
+    # Collect module files from multiple sources with priority order
+    $allModules = @{}
 
-    if (-not (Test-Path $modulesPath)) {
+    # Priority 1: Box-specific modules (.box/modules/) - highest priority
+    $boxModulesPath = Join-Path (Get-Location) ".box\modules"
+    if (Test-Path $boxModulesPath) {
+        $boxModuleFiles = Get-ChildItem -Path $boxModulesPath -Filter '*.ps1' -ErrorAction SilentlyContinue
+        foreach ($file in $boxModuleFiles) {
+            $commandName = [System.IO.Path]::GetFileNameWithoutExtension($file.Name)
+            if (-not $allModules.ContainsKey($commandName)) {
+                $allModules[$commandName] = @{
+                    File = $file
+                    Source = 'box-override'
+                }
+            }
+        }
+    }
+
+    # Priority 2: Core modules (modules/$Mode/) - fallback
+    $modulesPath = Join-Path $script:BoxingRoot "modules\$Mode"
+    if (Test-Path $modulesPath) {
+        $moduleFiles = Get-ChildItem -Path $modulesPath -Filter '*.ps1' | Sort-Object Name
+        foreach ($file in $moduleFiles) {
+            $commandName = [System.IO.Path]::GetFileNameWithoutExtension($file.Name)
+            if (-not $allModules.ContainsKey($commandName)) {
+                $allModules[$commandName] = @{
+                    File = $file
+                    Source = 'core'
+                }
+            }
+        }
+    }
+
+    if ($allModules.Count -eq 0) {
         Write-Verbose "No modules found for mode: $Mode"
         return
     }
 
-    $moduleFiles = Get-ChildItem -Path $modulesPath -Filter '*.ps1' | Sort-Object Name
+    # Load all collected modules
+    foreach ($commandName in $allModules.Keys) {
+        $moduleInfo = $allModules[$commandName]
+        $file = $moduleInfo.File
+        $source = $moduleInfo.Source
 
-    foreach ($file in $moduleFiles) {
         try {
             . $file.FullName
 
-            $commandName = [System.IO.Path]::GetFileNameWithoutExtension($file.Name)
             $script:Commands[$commandName] = $file.FullName
             $script:LoadedModules[$file.Name] = $file.FullName
 
-            Write-Verbose "Loaded module: $Mode/$($file.Name)"
+            Write-Verbose "Loaded module ($source): $Mode/$($file.Name)"
         }
         catch {
             Write-Warning "Failed to load module $($file.Name): $_"
@@ -144,22 +183,24 @@ function Import-ModeModules {
 function Register-EmbeddedCommands {
     param([string]$Mode)
 
-    # For embedded versions, register known commands
-    if ($Mode -eq 'boxer') {
-        $script:Commands['init'] = 'Invoke-Boxer-Init'
-        $script:Commands['install'] = 'Install-Box'
-        $script:Commands['list'] = 'Invoke-Boxer-List'
-        $script:Commands['version'] = 'Invoke-Boxer-Version'
-    }
-    elseif ($Mode -eq 'box') {
-        $script:Commands['install'] = 'Invoke-Box-Install'
-        $script:Commands['env'] = 'Invoke-Box-Env'
-        $script:Commands['clean'] = 'Invoke-Box-Clean'
-        $script:Commands['status'] = 'Invoke-Box-Status'
-        $script:Commands['uninstall'] = 'Invoke-Box-Uninstall'
-        $script:Commands['load'] = 'Invoke-Box-Load'
-        $script:Commands['info'] = 'Invoke-Box-Info'
-        $script:Commands['version'] = 'Invoke-Box-Version'
+    # For embedded versions, discover commands dynamically by scanning loaded functions
+    $prefix = "Invoke-$Mode-"
+    $functions = Get-Command -Name "$prefix*" -CommandType Function -ErrorAction SilentlyContinue
+
+    foreach ($func in $functions) {
+        $funcName = $func.Name
+        # Extract command name: Invoke-Box-Install → install, Invoke-Box-Env-List → env
+        $commandName = $funcName.Substring($prefix.Length).ToLower()
+
+        # For sub-commands (env-list), keep only base command
+        if ($commandName -match '^([^-]+)-') {
+            $commandName = $matches[1]
+        }
+
+        if (-not $script:Commands.ContainsKey($commandName)) {
+            $script:Commands[$commandName] = $funcName
+            Write-Verbose "Registered command: $commandName → $funcName"
+        }
     }
 }
 
@@ -502,16 +543,29 @@ function Show-Help {
     Write-Host "Boxing - Reproducible Environment Manager" -ForegroundColor Cyan
     Write-Host ""
     Write-Host "Commands:" -ForegroundColor Yellow
-    if ($script:Mode -eq 'boxer') {
-        Write-Host "  boxer init <name>     Create a new Box project" -ForegroundColor White
-        Write-Host "  boxer list            List available Box types" -ForegroundColor White
-        Write-Host "  boxer install <url>   Install a Box from GitHub" -ForegroundColor White
-    } else {
-        Write-Host "  box install           Install workspace packages" -ForegroundColor White
-        Write-Host "  box status            Show installation status" -ForegroundColor White
-        Write-Host "  box env list          List environment variables" -ForegroundColor White
-        Write-Host "  box clean             Clean installation" -ForegroundColor White
-        Write-Host "  box uninstall         Remove all packages" -ForegroundColor White
+
+    $cmdName = if ($script:Mode -eq 'boxer') { 'boxer' } else { 'box' }
+
+    # Generate help from registered commands dynamically
+    if ($script:Commands.Count -gt 0) {
+        $sortedCommands = $script:Commands.Keys | Sort-Object
+        foreach ($cmd in $sortedCommands) {
+            $description = switch ($cmd) {
+                'init'      { 'Create a new Box project' }
+                'list'      { 'List available Box types' }
+                'install'   { if ($script:Mode -eq 'boxer') { 'Install a Box from GitHub' } else { 'Install workspace packages' } }
+                'status'    { 'Show installation status' }
+                'env'       { 'Manage environment variables' }
+                'clean'     { 'Clean installation' }
+                'uninstall' { 'Remove all packages' }
+                'load'      { 'Load environment into current shell' }
+                'info'      { 'Show workspace information' }
+                'version'   { 'Show version' }
+                default     { $cmd }
+            }
+            $padding = ' ' * (16 - $cmd.Length)
+            Write-Host "  $cmdName $cmd$padding$description" -ForegroundColor White
+        }
     }
     Write-Host ""
 }
@@ -1241,40 +1295,7 @@ Write-Host "✓ Boxing functions loaded (boxer, box)" -ForegroundColor Green
         }
 
         # Modify PowerShell profile
-        Write-Step "Configuring PowerShell profile..."
-
-        # Create profile directory if needed
-        $ProfileDir = Split-Path $ProfilePath -Parent
-        if (-not (Test-Path $ProfileDir)) {
-            New-Item -ItemType Directory -Path $ProfileDir -Force | Out-Null
-        }
-
-        # Read existing profile or create empty
-        $ProfileContent = ""
-        if (Test-Path $ProfilePath) {
-            $ProfileContent = Get-Content $ProfilePath -Raw
-        }
-
-        # Check if #region boxing already exists
-        if ($ProfileContent -match '#region boxing') {
-            Write-Success "Profile ready"
-        } else {
-            # Add Boxing region to profile (lightweight dot-source approach)
-            $BoxingRegion = @"
-
-#region boxing
-`$boxingInit = "`$env:USERPROFILE\Documents\PowerShell\Boxing\init.ps1"
-if (Test-Path `$boxingInit) {
-    . `$boxingInit
-}
-#endregion boxing
-"@
-
-            # Append to profile
-            $ProfileContent += $BoxingRegion
-            Set-Content -Path $ProfilePath -Value $ProfileContent -Encoding UTF8
-            Write-Success "Profile configured"
-        }
+        Add-BoxingToProfile
 
         # Install box if this is a box repository (not Boxing main repo)
         if ($SourceRepo) {
@@ -1515,20 +1536,132 @@ function Install-CurrentBox {
 # END modules/boxer/init.ps1
 # BEGIN modules/boxer/install.ps1
 # ============================================================================
-# Boxer Install Module
+# Boxer Install Command Dispatcher
 # ============================================================================
-#
-# Handles boxer install command - installing boxes from GitHub URLs
+
+function Invoke-Boxer-Install {
+    <#
+    .SYNOPSIS
+    Boxer install command dispatcher.
+
+    .PARAMETER Arguments
+    Command arguments (box name or GitHub URL).
+
+    .EXAMPLE
+    boxer install AmiDevBox
+    boxer install https://github.com/vbuzzano/AmiDevBox
+    #>
+    param(
+        [Parameter(ValueFromRemainingArguments=$true)]
+        [string[]]$Arguments
+    )
+
+    if (-not $Arguments -or $Arguments.Count -eq 0) {
+        Write-Host ""
+        Write-Host "Usage: boxer install <box-name|github-url>" -ForegroundColor Cyan
+        Write-Host ""
+        Write-Host "Install from registry:" -ForegroundColor Yellow
+        Write-Host "  boxer install AmiDevBox" -ForegroundColor DarkGray
+        Write-Host ""
+        Write-Host "Install from GitHub URL:" -ForegroundColor Yellow
+        Write-Host "  boxer install https://github.com/user/BoxName" -ForegroundColor DarkGray
+        Write-Host ""
+        Write-Host "Available boxes:" -ForegroundColor Cyan
+        foreach ($boxName in $script:BoxRegistry.Keys | Sort-Object) {
+            $url = $script:BoxRegistry[$boxName]
+            Write-Host "  - $boxName" -ForegroundColor White -NoNewline
+            Write-Host " ($url)" -ForegroundColor DarkGray
+        }
+        Write-Host ""
+        return
+    }
+
+    # Get box name or URL from first argument
+    $boxNameOrUrl = $Arguments[0]
+
+    # Call Install-Box
+    Install-Box -BoxUrl $boxNameOrUrl
+}
+
+# ============================================================================
+# Box Registry - Maps simple names to GitHub repository URLs
+# ============================================================================
+
+$script:BoxRegistry = @{
+    'AmiDevBox' = 'https://github.com/vbuzzano/AmiDevBox'
+    # 'BoxBuilder' = 'https://github.com/vbuzzano/BoxBuilder'  # Commented out until box exists
+}
+
+# ============================================================================
+# Box URL Resolution
+# ============================================================================
+
+function Get-BoxUrl {
+    <#
+    .SYNOPSIS
+    Resolves a box name or URL to a full GitHub repository URL.
+
+    .PARAMETER NameOrUrl
+    Either a simple box name (e.g., "AmiDevBox") or a full GitHub URL.
+
+    .RETURNS
+    Full GitHub repository URL.
+
+    .EXAMPLE
+    Get-BoxUrl "AmiDevBox"
+    Returns: https://github.com/vbuzzano/AmiDevBox
+
+    .EXAMPLE
+    Get-BoxUrl "https://github.com/user/CustomBox"
+    Returns: https://github.com/user/CustomBox (passthrough)
+    #>
+    param(
+        [Parameter(Mandatory=$true)]
+        [string]$NameOrUrl
+    )
+
+    # If already a URL, return as-is (passthrough)
+    if ($NameOrUrl -match '^https?://') {
+        return $NameOrUrl
+    }
+
+    # Try to resolve from registry
+    if ($script:BoxRegistry.ContainsKey($NameOrUrl)) {
+        return $script:BoxRegistry[$NameOrUrl]
+    }
+
+    # Not found in registry
+    Write-Host ""
+    Write-Host "Box '$NameOrUrl' not found in registry." -ForegroundColor Red
+    Write-Host ""
+    Write-Host "Available boxes:" -ForegroundColor Cyan
+    foreach ($boxName in $script:BoxRegistry.Keys | Sort-Object) {
+        $url = $script:BoxRegistry[$boxName]
+        Write-Host "  - $boxName" -ForegroundColor White -NoNewline
+        Write-Host " ($url)" -ForegroundColor DarkGray
+    }
+    Write-Host ""
+    Write-Host "You can also install from any GitHub URL:" -ForegroundColor Cyan
+    Write-Host "  boxer install https://github.com/user/BoxName" -ForegroundColor DarkGray
+    Write-Host ""
+
+    throw "Box '$NameOrUrl' not found"
+}
+
+# ============================================================================
+# Box Installation
+# ============================================================================
 
 function Install-Box {
     <#
     .SYNOPSIS
-    Installs a box from a GitHub URL.
+    Installs a box from GitHub URL or simple name.
 
     .PARAMETER BoxUrl
-    GitHub repository URL (e.g., https://github.com/user/BoxName)
+    GitHub repository URL or simple box name (e.g., "AmiDevBox").
 
     .EXAMPLE
+    boxer install AmiDevBox
     boxer install https://github.com/vbuzzano/AmiDevBox
     #>
     param(
@@ -1536,11 +1669,20 @@ function Install-Box {
         [string]$BoxUrl
     )
 
-    Write-Step "Installing box from $BoxUrl..."
+    # Resolve name to URL if needed
+    try {
+        $resolvedUrl = Get-BoxUrl -NameOrUrl $BoxUrl
+    }
+    catch {
+        Write-Error $_.Exception.Message
+        return
+    }
+
+    Write-Step "Installing box from $resolvedUrl..."
 
     try {
         # Parse GitHub URL to extract owner, repo, branch
-        if ($BoxUrl -match 'github\.com[:/](?<owner>[^/]+)/(?<repo>[^/]+?)(?:\.git)?$') {
+        if ($resolvedUrl -match 'github\.com[:/](?<owner>[^/]+)/(?<repo>[^/]+?)(?:\.git)?$') {
             $Owner = $Matches['owner']
             $Repo = $Matches['repo']
             $BoxName = $Repo
@@ -1708,40 +1850,220 @@ function Get-RemoteBoxVersion {
     return $null
 }
 
+# ============================================================================
+# PowerShell Profile Integration
+# ============================================================================
+
+function Add-BoxingToProfile {
+    <#
+    .SYNOPSIS
+    Adds boxer and box functions to PowerShell profile for automatic availability.
+
+    .DESCRIPTION
+    Integrates Boxing System into user's PowerShell profile by adding:
+    - boxer() function wrapper for global box management
+    - box() function wrapper for project commands
+
+    Uses #region boxing markers for idempotent operation (won't duplicate on reinstall).
+
+    .EXAMPLE
+    Add-BoxingToProfile
+    #>
+
+    try {
+        # Determine profile path
+        $ProfilePath = $PROFILE.CurrentUserCurrentHost
+        $BoxerPath = Join-Path $env:USERPROFILE "Documents\PowerShell\Boxing\boxer.ps1"
+
+        Write-Step "Integrating Boxing into PowerShell profile..."
+
+        # Create profile directory if needed
+        $ProfileDir = Split-Path $ProfilePath -Parent
+        if (-not (Test-Path $ProfileDir)) {
+            Write-Verbose "Creating profile directory: $ProfileDir"
+            New-Item -ItemType Directory -Path $ProfileDir -Force | Out-Null
+        }
+
+        # Check if profile already has boxing region
+        $hasBoxingRegion = $false
+        if (Test-Path $ProfilePath) {
+            $profileContent = Get-Content $ProfilePath -Raw
+            if ($profileContent -match '#region boxing') {
+                $hasBoxingRegion = $true
+            }
+        }
+
+        if ($hasBoxingRegion) {
+            Write-Host "  ✓ Boxing already integrated in profile (idempotent)" -ForegroundColor Green
+            return
+        }
+
+        # Profile content to add
+        $boxingRegion = @"
+
+#region boxing
+# Boxing System Integration
+# Auto-generated by boxer installation
+
+function boxer {
+    `$boxerPath = "$BoxerPath"
+    if (Test-Path `$boxerPath) {
+        & `$boxerPath `$args
+    } else {
+        Write-Error "boxer.ps1 not found at `$boxerPath. Please reinstall Boxing System."
+    }
+}
+
+function box {
+    # Search for box.ps1 in current directory and parent directories
+    `$currentDir = Get-Location
+    `$searchPath = `$currentDir
+    `$maxDepth = 5  # Prevent infinite loops
+    `$depth = 0
+
+    while (`$depth -lt `$maxDepth) {
+        `$boxPath = Join-Path `$searchPath "box.ps1"
+        if (Test-Path `$boxPath) {
+            & `$boxPath `$args
+            return
+        }
+
+        # Move to parent directory
+        `$parent = Split-Path `$searchPath -Parent
+        if (-not `$parent -or `$parent -eq `$searchPath) {
+            break  # Reached filesystem root
+        }
+        `$searchPath = `$parent
+        `$depth++
+    }
+
+    Write-Error "box.ps1 not found in current directory or parent directories (searched up to `$depth levels)"
+}
+
+#endregion boxing
+"@
+
+        # Append to profile
+        if (-not (Test-Path $ProfilePath)) {
+            # Create new profile
+            $boxingRegion | Set-Content -Path $ProfilePath -Encoding UTF8
+            Write-Host "  ✓ Created profile with Boxing integration" -ForegroundColor Green
+        } else {
+            # Append to existing profile
+            $boxingRegion | Add-Content -Path $ProfilePath -Encoding UTF8
+            Write-Host "  ✓ Added Boxing integration to existing profile" -ForegroundColor Green
+        }
+
+        Write-Host ""
+        Write-Host "  PowerShell profile updated successfully!" -ForegroundColor Cyan
+        Write-Host "  Location: $ProfilePath" -ForegroundColor DarkGray
+        Write-Host ""
+        Write-Host "  To use boxer and box in this session, run:" -ForegroundColor Yellow
+        Write-Host "    . `$PROFILE" -ForegroundColor White
+        Write-Host ""
+        Write-Host "  Or simply open a new PowerShell window." -ForegroundColor Yellow
+        Write-Host ""
+
+    } catch {
+        # Handle permission errors gracefully
+        if ($_.Exception.Message -match "Access.*denied|UnauthorizedAccessException") {
+            Write-Host ""
+            Write-Host "  ⚠ Profile integration failed: Permission denied" -ForegroundColor Yellow
+            Write-Host ""
+            Write-Host "  To fix this:" -ForegroundColor Cyan
+            Write-Host "    1. Run PowerShell as Administrator" -ForegroundColor White
+            Write-Host "    2. Or manually add boxing functions to your profile:" -ForegroundColor White
+            Write-Host "       notepad `$PROFILE" -ForegroundColor DarkGray
+            Write-Host ""
+        } else {
+            Write-Warning "Profile integration failed: $($_.Exception.Message)"
+        }
+    }
+}
+
 # END modules/boxer/install.ps1
 # BEGIN modules/boxer/list.ps1
 # ============================================================================
 # Boxer List Module
 # ============================================================================
 #
-# Handles boxer list command - listing available boxes
+# Handles boxer list command - listing installed boxes from user installation directory
 
 function Invoke-Boxer-List {
     <#
     .SYNOPSIS
-    Lists all available Box types.
+    Lists all installed Box types from ~/Documents/PowerShell/Boxing/Boxes/.
+
+    .DESCRIPTION
+    Displays boxes that are actually installed on the user's system,
+    not development boxes in the repository.
 
     .EXAMPLE
     boxer list
     #>
     Write-Host ""
-    Write-Host "Available Boxes:" -ForegroundColor Cyan
+    Write-Host "Installed Boxes:" -ForegroundColor Cyan
     Write-Host ""
 
-    $boxersPath = Join-Path (Split-Path -Parent $PSScriptRoot) "boxers"
+    # Read from user installation directory, not repository
+    $boxesPath = Join-Path $env:USERPROFILE "Documents\PowerShell\Boxing\Boxes"
 
-    if (Test-Path $boxersPath) {
-        Get-ChildItem -Path $boxersPath -Directory | ForEach-Object {
-            $metadataPath = Join-Path $_.FullName "metadata.psd1"
-            if (Test-Path $metadataPath) {
+    if (-not (Test-Path $boxesPath)) {
+        Write-Host "  No boxes installed yet." -ForegroundColor Yellow
+        Write-Host ""
+        Write-Host "  To install a box, run:" -ForegroundColor Gray
+        Write-Host "    boxer install <box-name-or-url>" -ForegroundColor DarkGray
+        Write-Host ""
+        Write-Host "  Examples:" -ForegroundColor Gray
+        Write-Host "    boxer install AmiDevBox" -ForegroundColor DarkGray
+        Write-Host "    boxer install https://github.com/user/MyBox" -ForegroundColor DarkGray
+        Write-Host ""
+        return
+    }
+
+    $boxes = Get-ChildItem -Path $boxesPath -Directory -ErrorAction SilentlyContinue
+
+    if (-not $boxes -or @($boxes).Count -eq 0) {
+        Write-Host "  No boxes installed yet." -ForegroundColor Yellow
+        Write-Host ""
+        Write-Host "  To install a box, run:" -ForegroundColor Gray
+        Write-Host "    boxer install <box-name-or-url>" -ForegroundColor DarkGray
+        Write-Host ""
+        return
+    }
+
+    # Display installed boxes with version and description
+    $hasValidBoxes = $false
+
+    foreach ($boxDir in $boxes) {
+        $metadataPath = Join-Path $boxDir.FullName "metadata.psd1"
+
+        if (Test-Path $metadataPath) {
+            try {
                 $metadata = Import-PowerShellDataFile $metadataPath
-                Write-Host ("  {0,-20} - {1}" -f $_.Name, $metadata.Description) -ForegroundColor White
-            } else {
-                Write-Host ("  {0,-20} - {1}" -f $_.Name, "(No description)") -ForegroundColor Gray
+                $version = if ($metadata.ContainsKey('Version')) { "v$($metadata.Version)" } else { "(no version)" }
+                $description = if ($metadata.ContainsKey('Description')) { $metadata.Description } else { "(no description)" }
+
+                Write-Host ("  {0,-20} {1,-12} - {2}" -f $boxDir.Name, $version, $description) -ForegroundColor White
+                $hasValidBoxes = $true
+            }
+            catch {
+                # Corrupted metadata.psd1 - show warning but continue
+                Write-Host ("  {0,-20} " -f $boxDir.Name) -NoNewline -ForegroundColor Yellow
+                Write-Host "(corrupted metadata)" -ForegroundColor DarkYellow
+                Write-Warning "Failed to read metadata for $($boxDir.Name): $_"
             }
         }
-    } else {
-        Write-Warn "No boxes found in: $boxersPath"
+        else {
+            # No metadata - still show the box
+            Write-Host ("  {0,-20} " -f $boxDir.Name) -NoNewline -ForegroundColor Gray
+            Write-Host "(no metadata)" -ForegroundColor DarkGray
+            $hasValidBoxes = $true
+        }
+    }
+
+    if (-not $hasValidBoxes) {
+        Write-Host "  No valid boxes found in: $boxesPath" -ForegroundColor Yellow
     }
 
     Write-Host ""

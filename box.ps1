@@ -6,8 +6,8 @@
     Standalone box.ps1 with embedded modules
 
 .NOTES
-    Build Date: 2026-01-08 04:38:01
-    Version: 0.1.71
+    Build Date: 2026-01-12 21:24:24
+    Version: 0.1.82
 #>
 
 param(
@@ -25,7 +25,7 @@ $ErrorActionPreference = 'Stop'
 # ============================================================================
 
 # Embedded version information (injected by build script)
-$script:BoxerVersion = "0.1.71"
+$script:BoxerVersion = "0.1.82"
 
 $BaseDir = Get-Location
 $BoxDir = $null
@@ -83,6 +83,12 @@ if (-not (Get-Variable -Name IsEmbedded -Scope Script -ErrorAction SilentlyConti
 
 # Detect execution mode
 function Initialize-Mode {
+    # If mode already set (by embedded script), use it
+    if ($script:Mode) {
+        Write-Verbose "Mode already set: $script:Mode"
+        return $script:Mode
+    }
+
     # When executed via irm|iex, $MyInvocation.PSCommandPath is empty
     # In this case, default to 'boxer' mode for installation
     if (-not $MyInvocation.PSCommandPath) {
@@ -144,24 +150,57 @@ function Import-ModeModules {
         return
     }
 
-    $modulesPath = Join-Path $script:BoxingRoot "modules\$Mode"
+    # Collect module files from multiple sources with priority order
+    $allModules = @{}
 
-    if (-not (Test-Path $modulesPath)) {
+    # Priority 1: Box-specific modules (.box/modules/) - highest priority
+    $boxModulesPath = Join-Path (Get-Location) ".box\modules"
+    if (Test-Path $boxModulesPath) {
+        $boxModuleFiles = Get-ChildItem -Path $boxModulesPath -Filter '*.ps1' -ErrorAction SilentlyContinue
+        foreach ($file in $boxModuleFiles) {
+            $commandName = [System.IO.Path]::GetFileNameWithoutExtension($file.Name)
+            if (-not $allModules.ContainsKey($commandName)) {
+                $allModules[$commandName] = @{
+                    File = $file
+                    Source = 'box-override'
+                }
+            }
+        }
+    }
+
+    # Priority 2: Core modules (modules/$Mode/) - fallback
+    $modulesPath = Join-Path $script:BoxingRoot "modules\$Mode"
+    if (Test-Path $modulesPath) {
+        $moduleFiles = Get-ChildItem -Path $modulesPath -Filter '*.ps1' | Sort-Object Name
+        foreach ($file in $moduleFiles) {
+            $commandName = [System.IO.Path]::GetFileNameWithoutExtension($file.Name)
+            if (-not $allModules.ContainsKey($commandName)) {
+                $allModules[$commandName] = @{
+                    File = $file
+                    Source = 'core'
+                }
+            }
+        }
+    }
+
+    if ($allModules.Count -eq 0) {
         Write-Verbose "No modules found for mode: $Mode"
         return
     }
 
-    $moduleFiles = Get-ChildItem -Path $modulesPath -Filter '*.ps1' | Sort-Object Name
+    # Load all collected modules
+    foreach ($commandName in $allModules.Keys) {
+        $moduleInfo = $allModules[$commandName]
+        $file = $moduleInfo.File
+        $source = $moduleInfo.Source
 
-    foreach ($file in $moduleFiles) {
         try {
             . $file.FullName
 
-            $commandName = [System.IO.Path]::GetFileNameWithoutExtension($file.Name)
             $script:Commands[$commandName] = $file.FullName
             $script:LoadedModules[$file.Name] = $file.FullName
 
-            Write-Verbose "Loaded module: $Mode/$($file.Name)"
+            Write-Verbose "Loaded module ($source): $Mode/$($file.Name)"
         }
         catch {
             Write-Warning "Failed to load module $($file.Name): $_"
@@ -173,22 +212,24 @@ function Import-ModeModules {
 function Register-EmbeddedCommands {
     param([string]$Mode)
 
-    # For embedded versions, register known commands
-    if ($Mode -eq 'boxer') {
-        $script:Commands['init'] = 'Invoke-Boxer-Init'
-        $script:Commands['install'] = 'Install-Box'
-        $script:Commands['list'] = 'Invoke-Boxer-List'
-        $script:Commands['version'] = 'Invoke-Boxer-Version'
-    }
-    elseif ($Mode -eq 'box') {
-        $script:Commands['install'] = 'Invoke-Box-Install'
-        $script:Commands['env'] = 'Invoke-Box-Env'
-        $script:Commands['clean'] = 'Invoke-Box-Clean'
-        $script:Commands['status'] = 'Invoke-Box-Status'
-        $script:Commands['uninstall'] = 'Invoke-Box-Uninstall'
-        $script:Commands['load'] = 'Invoke-Box-Load'
-        $script:Commands['info'] = 'Invoke-Box-Info'
-        $script:Commands['version'] = 'Invoke-Box-Version'
+    # For embedded versions, discover commands dynamically by scanning loaded functions
+    $prefix = "Invoke-$Mode-"
+    $functions = Get-Command -Name "$prefix*" -CommandType Function -ErrorAction SilentlyContinue
+
+    foreach ($func in $functions) {
+        $funcName = $func.Name
+        # Extract command name: Invoke-Box-Install → install, Invoke-Box-Env-List → env
+        $commandName = $funcName.Substring($prefix.Length).ToLower()
+
+        # For sub-commands (env-list), keep only base command
+        if ($commandName -match '^([^-]+)-') {
+            $commandName = $matches[1]
+        }
+
+        if (-not $script:Commands.ContainsKey($commandName)) {
+            $script:Commands[$commandName] = $funcName
+            Write-Verbose "Registered command: $commandName → $funcName"
+        }
     }
 }
 
@@ -2966,16 +3007,29 @@ function Show-Help {
     Write-Host "Boxing - Reproducible Environment Manager" -ForegroundColor Cyan
     Write-Host ""
     Write-Host "Commands:" -ForegroundColor Yellow
-    if ($script:Mode -eq 'boxer') {
-        Write-Host "  boxer init <name>     Create a new Box project" -ForegroundColor White
-        Write-Host "  boxer list            List available Box types" -ForegroundColor White
-        Write-Host "  boxer install <url>   Install a Box from GitHub" -ForegroundColor White
-    } else {
-        Write-Host "  box install           Install workspace packages" -ForegroundColor White
-        Write-Host "  box status            Show installation status" -ForegroundColor White
-        Write-Host "  box env list          List environment variables" -ForegroundColor White
-        Write-Host "  box clean             Clean installation" -ForegroundColor White
-        Write-Host "  box uninstall         Remove all packages" -ForegroundColor White
+
+    $cmdName = if ($script:Mode -eq 'boxer') { 'boxer' } else { 'box' }
+
+    # Generate help from registered commands dynamically
+    if ($script:Commands.Count -gt 0) {
+        $sortedCommands = $script:Commands.Keys | Sort-Object
+        foreach ($cmd in $sortedCommands) {
+            $description = switch ($cmd) {
+                'init'      { 'Create a new Box project' }
+                'list'      { 'List available Box types' }
+                'install'   { if ($script:Mode -eq 'boxer') { 'Install a Box from GitHub' } else { 'Install workspace packages' } }
+                'status'    { 'Show installation status' }
+                'env'       { 'Manage environment variables' }
+                'clean'     { 'Clean installation' }
+                'uninstall' { 'Remove all packages' }
+                'load'      { 'Load environment into current shell' }
+                'info'      { 'Show workspace information' }
+                'version'   { 'Show version' }
+                default     { $cmd }
+            }
+            $padding = ' ' * (16 - $cmd.Length)
+            Write-Host "  $cmdName $cmd$padding$description" -ForegroundColor White
+        }
     }
     Write-Host ""
 }
@@ -3171,6 +3225,320 @@ function Invoke-Box-Clean {
 }
 
 # END modules/box/clean.ps1
+# BEGIN modules/box/env.ps1
+# ============================================================================
+# Box Env Module - Main Dispatcher
+# ============================================================================
+#
+# Handles box env command with subcommands (list, load, replace, update)
+
+function Invoke-Box-Env {
+    <#
+    .SYNOPSIS
+    Manages environment variables for the project.
+
+    .PARAMETER Sub
+    Subcommand to execute: list, load, replace, update
+
+    .EXAMPLE
+    box env list
+    box env load
+    box env replace KEY=VALUE
+    box env update
+    #>
+
+    param(
+        [Parameter(Position=0)]
+        [string]$Sub
+    )
+
+    # Default to list if no subcommand
+    if (-not $Sub) {
+        $Sub = 'list'
+    }
+
+    # Dispatch to appropriate subcommand
+    switch ($Sub.ToLower()) {
+        'list' {
+            Invoke-Box-Env-List
+        }
+        'load' {
+            Invoke-Box-Env-Load
+        }
+        'replace' {
+            Invoke-Box-Env-Replace -KeyValue $args
+        }
+        'update' {
+            Invoke-Box-Env-Update
+        }
+        default {
+            Write-Host "Unknown env subcommand: $Sub" -ForegroundColor Red
+            Write-Host "Available: list, load, replace, update" -ForegroundColor Gray
+            exit 1
+        }
+    }
+}
+
+# END modules/box/env.ps1
+# BEGIN modules/box/env\list.ps1
+# ============================================================================
+# Box Env Module - List subcommand
+# ============================================================================
+
+function Invoke-Box-Env-List {
+    <#
+    .SYNOPSIS
+    Displays all environment variables configured for the project.
+
+    .EXAMPLE
+    box env list
+    box env
+    #>
+
+    Write-Host ""
+    Write-Host "Environment Variables:" -ForegroundColor Cyan
+    Write-Host ""
+
+    $state = Load-State
+    if ($state.packages) {
+        foreach ($pkgName in $state.packages.Keys) {
+            $pkg = $state.packages[$pkgName]
+            if ($pkg.envs) {
+                Write-Host "  $pkgName" -ForegroundColor White
+                foreach ($envName in $pkg.envs.Keys) {
+                    $envValue = $pkg.envs[$envName]
+                    Write-Host ("    {0,-20} = {1}" -f $envName, $envValue) -ForegroundColor Gray
+                }
+            }
+        }
+    } else {
+        Write-Info "No packages installed yet"
+    }
+
+    Write-Host ""
+}
+
+# END modules/box/env\list.ps1
+# BEGIN modules/box/env\load.ps1
+# ============================================================================
+# Box Env Module - Load subcommand
+# ============================================================================
+
+function Invoke-Box-Env-Load {
+    <#
+    .SYNOPSIS
+    Loads .env file into current PowerShell session environment variables.
+
+    .DESCRIPTION
+    Reads .env file and sets all variables as environment variables in the
+    current PowerShell session. Also adds .box/ and scripts/ to PATH.
+
+    .EXAMPLE
+    box env load
+    #>
+
+    $envFile = Join-Path $BaseDir ".env"
+
+    if (-not (Test-Path $envFile)) {
+        Write-Err ".env file not found. Run 'box env update' first."
+        return
+    }
+
+    $loadedCount = 0
+    Get-Content $envFile | ForEach-Object {
+        if ($_ -match '^([^#=]+)=(.*)$') {
+            $key = $matches[1].Trim()
+            $value = $matches[2].Trim()
+            Set-Item "env:$key" $value
+            $loadedCount++
+        }
+    }
+
+    # Add .box and scripts to PATH
+    $boxPath = Join-Path $BaseDir ".box"
+    $scriptsPath = Join-Path $BaseDir "scripts"
+    $env:PATH = "$boxPath;$scriptsPath;$env:PATH"
+
+    Write-Success "Loaded $loadedCount variables from .env into session"
+    Write-Info "Added to PATH: .box/, scripts/"
+}
+
+# END modules/box/env\load.ps1
+# BEGIN modules/box/env\replace.ps1
+# ============================================================================
+# Box Env Module - Replace subcommand
+# ============================================================================
+
+function Invoke-Box-Env-Replace {
+    <#
+    .SYNOPSIS
+    Replaces tagged values in files with environment variables.
+
+    .DESCRIPTION
+    Processes files and replaces tagged values with current environment
+    variable values. Supports in-place updates (preserves tags) or
+    release mode (strips tags).
+
+    Syntaxes supported:
+    - ~value[VAR_NAME]~ : Universal tag
+    - Box-specific syntaxes via hooks (e.g., #define for C)
+
+    .PARAMETER Path
+    Path pattern to files to process (e.g., *.md, src/, README.md)
+
+    .PARAMETER OutputDir
+    If specified, copies processed files to this directory with tags stripped.
+    If not specified, updates files in-place preserving tags.
+
+    .PARAMETER Force
+    Required for in-place updates to prevent accidental overwrites.
+
+    .EXAMPLE
+    box env replace *.md -Force
+    Updates all Markdown files in-place
+
+    .EXAMPLE
+    box env replace . -OutputDir dist/ -Force
+    Copies all files to dist/ with tags stripped (release mode)
+    #>
+    param(
+        [Parameter(Position = 0, Mandatory = $true)]
+        [string]$Path,
+
+        [Parameter(Mandatory = $false)]
+        [string]$OutputDir = $null,
+
+        [switch]$Force
+    )
+
+    # Load variables
+    $variables = Get-TemplateVariables
+    if ($variables.Count -eq 0) {
+        Write-Warn "No variables found in .env"
+        return
+    }
+
+    # Determine mode
+    $releaseMode = $null -ne $OutputDir
+
+    # Require -Force for in-place updates
+    if (-not $releaseMode -and -not $Force) {
+        Write-Err "In-place replacement requires -Force flag"
+        Write-Info "Use: box env replace $Path -Force"
+        return
+    }
+
+    # Create output directory if needed
+    if ($releaseMode -and -not (Test-Path $OutputDir)) {
+        New-Item -ItemType Directory -Path $OutputDir -Force | Out-Null
+    }
+
+    # Process files
+    Update-TaggedFiles -Path $Path -ReleaseMode:$releaseMode -Variables $variables
+
+    if ($releaseMode) {
+        Write-Success "Files processed to $OutputDir (tags stripped)"
+    } else {
+        Write-Success "Files updated in-place (tags preserved)"
+    }
+}
+
+# END modules/box/env\replace.ps1
+# BEGIN modules/box/env\update.ps1
+# ============================================================================
+# Box Env Module - Update subcommand
+# ============================================================================
+
+function Invoke-Box-Env-Update {
+    <#
+    .SYNOPSIS
+    Updates .env file and VS Code settings from installed packages.
+
+    .DESCRIPTION
+    Regenerates .env file from all installed package configurations,
+    updates VS Code terminal environment variables, and updates
+    tagged files throughout the project.
+
+    .EXAMPLE
+    box env update
+    #>
+
+    Generate-AllEnvFiles
+    Update-VSCodeEnv
+    Update-TaggedFiles -Path $BaseDir -Recurse
+    Write-Success ".env updated"
+}
+
+function Update-VSCodeEnv {
+    <#
+    .SYNOPSIS
+    Updates .vscode/settings.json with environment variables from .env file.
+    Only updates the terminal.integrated.env.windows section.
+    #>
+    $envFile = Join-Path $BaseDir ".env"
+    $settingsFile = Join-Path $BaseDir ".vscode\settings.json"
+
+    if (-not (Test-Path $settingsFile)) {
+        Write-Verbose ".vscode/settings.json not found, skipping VS Code env update"
+        return
+    }
+
+    if (-not (Test-Path $envFile)) {
+        Write-Verbose ".env file not found, skipping VS Code env update"
+        return
+    }
+
+    # Parse .env file
+    $envVars = @{}
+    Get-Content $envFile | ForEach-Object {
+        if ($_ -match '^([^#=]+)=(.*)$') {
+            $key = $matches[1].Trim()
+            $value = $matches[2].Trim()
+            # Remove quotes if present
+            $value = $value -replace '^"(.*)"$', '$1'
+            $value = $value -replace "^'(.*)'$", '$1'
+            $envVars[$key] = $value
+        }
+    }
+
+    if ($envVars.Count -eq 0) {
+        Write-Verbose "No variables found in .env"
+        return
+    }
+
+    # Read settings.json
+    try {
+        $settingsContent = Get-Content $settingsFile -Raw -Encoding UTF8
+        $settings = $settingsContent | ConvertFrom-Json -AsHashtable
+    }
+    catch {
+        Write-Warn "Failed to parse .vscode/settings.json: $_"
+        return
+    }
+
+    # Update terminal.integrated.env.windows
+    if (-not $settings.ContainsKey('terminal.integrated.env.windows')) {
+        $settings['terminal.integrated.env.windows'] = @{}
+    }
+
+    # Merge .env vars into existing settings (keep user-added variables)
+    $existingEnv = $settings['terminal.integrated.env.windows']
+    foreach ($key in $envVars.Keys) {
+        $existingEnv[$key] = $envVars[$key]
+    }
+    $settings['terminal.integrated.env.windows'] = $existingEnv
+
+    # Save back to file
+    try {
+        $settings | ConvertTo-Json -Depth 10 | Set-Content $settingsFile -Encoding UTF8
+        Write-Verbose "Updated .vscode/settings.json with $($envVars.Count) environment variables"
+    }
+    catch {
+        Write-Warn "Failed to save .vscode/settings.json: $_"
+    }
+}
+
+# END modules/box/env\update.ps1
 # BEGIN modules/box/info.ps1
 # Box Info Command
 # Display detailed information for current box workspace
@@ -3371,6 +3739,170 @@ function Invoke-Box-Load {
 }
 
 # END modules/box/load.ps1
+# BEGIN modules/box/pkg.ps1
+# ============================================================================
+# Package Management Dispatcher
+# ============================================================================
+#
+# Provides pkg subcommand dispatcher for direct package management CLI access.
+# Routes commands: install, list, validate, uninstall, state
+
+function Invoke-Box-Pkg {
+    <#
+    .SYNOPSIS
+    Package management dispatcher for box pkg subcommands.
+
+    .DESCRIPTION
+    Routes pkg subcommands to appropriate handlers:
+    - install: Install specific package by name
+    - list: Display all installed packages
+    - validate: Check package dependencies
+    - uninstall: Remove specific package
+    - state: Display package state from state.json
+    - (no subcommand): Display help
+
+    .PARAMETER Subcommand
+    Package action to perform (install, list, validate, uninstall, state)
+
+    .PARAMETER Args
+    Arguments to pass to the subcommand handler
+
+    .EXAMPLE
+    Invoke-Box-Pkg 'list'
+    Displays all installed packages
+
+    .EXAMPLE
+    Invoke-Box-Pkg 'install' @('NDK39')
+    Installs the NDK39 package
+    #>
+    param(
+        [Parameter(Position=0)]
+        [string]$Subcommand,
+
+        [Parameter(Position=1, ValueFromRemainingArguments=$true)]
+        [string[]]$Args
+    )
+
+    # No subcommand or empty string -> show help
+    if ([string]::IsNullOrWhiteSpace($Subcommand)) {
+        Show-PkgHelp
+        return
+    }
+
+    # Route to appropriate handler
+    switch ($Subcommand.ToLower()) {
+        'install' {
+            if ($Args.Count -eq 0) {
+                Write-Error "Package name required. Usage: box pkg install <name>"
+                return
+            }
+
+            # Find package definition in config
+            $packageName = $Args[0]
+            $package = $AllPackages | Where-Object { $_.Name -eq $packageName }
+
+            if (-not $package) {
+                Write-Error "Package '$packageName' not found in config.psd1"
+                Write-Host "Available packages:" -ForegroundColor Gray
+                foreach ($pkg in $AllPackages) {
+                    Write-Host "  - $($pkg.Name)" -ForegroundColor DarkGray
+                }
+                return
+            }
+
+            Process-Package -Item $package
+        }
+
+        'list' {
+            Show-PackageList
+        }
+
+        'validate' {
+            # Validate all packages
+            Write-Host ""
+            Write-Host "Validating package dependencies..." -ForegroundColor Cyan
+            Write-Host ""
+
+            $hasErrors = $false
+            foreach ($pkg in $AllPackages) {
+                try {
+                    $envs = Validate-PackageDependencies -Package $pkg
+                    Write-Host "  ✓ $($pkg.Name): Dependencies satisfied" -ForegroundColor Green
+                }
+                catch {
+                    Write-Host "  ✗ $($pkg.Name): $_" -ForegroundColor Red
+                    $hasErrors = $true
+                }
+            }
+
+            Write-Host ""
+            if ($hasErrors) {
+                Write-Host "Some packages have dependency issues" -ForegroundColor Yellow
+            } else {
+                Write-Host "All package dependencies validated successfully" -ForegroundColor Green
+            }
+        }
+
+        'uninstall' {
+            if ($Args.Count -eq 0) {
+                Write-Error "Package name required. Usage: box pkg uninstall <name>"
+                return
+            }
+
+            $packageName = $Args[0]
+            Remove-Package -Name $packageName
+        }
+
+        'state' {
+            Show-PackageState
+        }
+
+        default {
+            Write-Error "Unknown pkg subcommand: $Subcommand. Run 'box pkg' for help."
+            Show-PkgHelp
+        }
+    }
+}
+
+function Show-PkgHelp {
+    <#
+    .SYNOPSIS
+    Displays help text for pkg subcommands.
+
+    .DESCRIPTION
+    Shows available pkg subcommands with descriptions and usage examples.
+
+    .EXAMPLE
+    Show-PkgHelp
+    #>
+
+    Write-Host ""
+    Write-Host "Package Management Commands:" -ForegroundColor Cyan
+    Write-Host ""
+    Write-Host "  box pkg install <name>    " -NoNewline -ForegroundColor White
+    Write-Host "Install specific package" -ForegroundColor Gray
+
+    Write-Host "  box pkg list              " -NoNewline -ForegroundColor White
+    Write-Host "List installed packages" -ForegroundColor Gray
+
+    Write-Host "  box pkg validate          " -NoNewline -ForegroundColor White
+    Write-Host "Validate package dependencies" -ForegroundColor Gray
+
+    Write-Host "  box pkg uninstall <name>  " -NoNewline -ForegroundColor White
+    Write-Host "Remove package" -ForegroundColor Gray
+
+    Write-Host "  box pkg state             " -NoNewline -ForegroundColor White
+    Write-Host "Display package state" -ForegroundColor Gray
+
+    Write-Host ""
+    Write-Host "Examples:" -ForegroundColor Cyan
+    Write-Host "  box pkg install NDK39" -ForegroundColor DarkGray
+    Write-Host "  box pkg list" -ForegroundColor DarkGray
+    Write-Host "  box pkg state" -ForegroundColor DarkGray
+    Write-Host ""
+}
+
+# END modules/box/pkg.ps1
 # BEGIN modules/box/status.ps1
 # ============================================================================
 # Box Status Module
@@ -3819,6 +4351,83 @@ function Show-PackageList {
 }
 
 # END modules/shared/pkg/list.ps1
+# BEGIN modules/shared/pkg/state.ps1
+# ============================================================================
+# Package State Display Module
+# ============================================================================
+#
+# Functions for displaying package state information from .box/state.json.
+
+function Show-PackageState {
+    <#
+    .SYNOPSIS
+    Displays the current package state from .box/state.json.
+
+    .DESCRIPTION
+    Shows the raw package state for debugging purposes, including:
+    - Installation status
+    - Installed files and directories
+    - Environment variable configurations
+    - Installation timestamps
+
+    .EXAMPLE
+    Show-PackageState
+    #>
+
+    $statePath = Join-Path $ProjectRoot ".box\state.json"
+
+    if (-not (Test-Path $statePath)) {
+        Write-Host ""
+        Write-Host "No package state file found (.box/state.json)" -ForegroundColor Yellow
+        Write-Host "Run 'box install' to initialize package state" -ForegroundColor Gray
+        Write-Host ""
+        return
+    }
+
+    try {
+        $state = Get-Content $statePath -Raw | ConvertFrom-Json
+
+        Write-Host ""
+        Write-Host "Package State (.box/state.json):" -ForegroundColor Cyan
+        Write-Host ""
+
+        if (-not $state.packages -or $state.packages.PSObject.Properties.Count -eq 0) {
+            Write-Host "  No packages installed" -ForegroundColor Gray
+            Write-Host ""
+            return
+        }
+
+        foreach ($pkgName in $state.packages.PSObject.Properties.Name) {
+            $pkg = $state.packages.$pkgName
+
+            Write-Host "  $pkgName" -ForegroundColor White
+            Write-Host "    Installed: $($pkg.installed)" -ForegroundColor $(if ($pkg.installed) { "Green" } else { "Yellow" })
+
+            if ($pkg.files -and $pkg.files.Count -gt 0) {
+                Write-Host "    Files: $($pkg.files.Count) file(s)" -ForegroundColor Gray
+            }
+
+            if ($pkg.dirs -and $pkg.dirs.Count -gt 0) {
+                Write-Host "    Directories: $($pkg.dirs.Count) dir(s)" -ForegroundColor Gray
+            }
+
+            if ($pkg.envs -and $pkg.envs.PSObject.Properties.Count -gt 0) {
+                Write-Host "    Environment Variables:" -ForegroundColor Gray
+                foreach ($envName in $pkg.envs.PSObject.Properties.Name) {
+                    $envValue = $pkg.envs.$envName
+                    Write-Host "      $envName = $envValue" -ForegroundColor DarkGray
+                }
+            }
+
+            Write-Host ""
+        }
+    }
+    catch {
+        Write-Error "Failed to read package state: $_"
+    }
+}
+
+# END modules/shared/pkg/state.ps1
 # BEGIN modules/shared/pkg/uninstall.ps1
 # ============================================================================
 # Package Uninstallation Module
@@ -3867,27 +4476,22 @@ function Remove-Package {
 # END modules/shared/pkg/uninstall.ps1
 
 # ============================================================================
-# MAIN - Command dispatcher
+# MAIN - Call Initialize-Boxing (Spec 010 architecture)
 # ============================================================================
 
-if (-not $Command) {
-    Show-Help
-    exit 0
+# Set embedded flag and mode before calling Initialize-Boxing
+$script:IsEmbedded = $true
+$script:Mode = 'box'
+
+# Build arguments array (Command + remaining Arguments)
+$allArgs = @()
+if ($Command) {
+    $allArgs += $Command
+}
+if ($Arguments) {
+    $allArgs += $Arguments
 }
 
-switch ($Command) {
-    "install" { Invoke-Box-Install }
-    "uninstall" { Invoke-Box-Uninstall }
-    "env" { Invoke-Box-Env -Sub ($Arguments[0]) }
-    "clean" { Invoke-Box-Clean }
-    "status" { Invoke-Box-Status }
-    "load" { Invoke-Box-Load }
-    "info" { Invoke-Box-Info }
-    "version" { Invoke-Box-Version }
-    default {
-        Write-Host "Unknown command: $Command" -ForegroundColor Red
-        Write-Host "Available: install, uninstall, env, clean, status, load, info, version" -ForegroundColor Gray
-        exit 1
-    }
-}
+# Call main bootstrapper with all arguments
+Initialize-Boxing -Arguments $allArgs
 

@@ -30,3 +30,5 @@ _*
 .github/
 .specify/
 specs/
+analyse-*/*
+archive-*/*
