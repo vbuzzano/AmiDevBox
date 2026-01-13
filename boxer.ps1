@@ -6,8 +6,8 @@
     Standalone boxer.ps1 with embedded modules
 
 .NOTES
-    Build Date: 2026-01-12 23:44:53
-    Version: 0.1.89
+    Build Date: 2026-01-13 02:00:08
+    Version: 0.1.94
 #>
 
 param(
@@ -25,7 +25,7 @@ $ErrorActionPreference = 'Stop'
 $script:IsEmbedded = $true
 
 # Embedded version information (injected by build script)
-$script:BoxerVersion = "0.1.89"
+$script:BoxerVersion = "0.1.94"
 
 # BEGIN boxing.ps1
 # Boxing - Common bootstrapper for boxer and box
@@ -1295,7 +1295,40 @@ Write-Host "✓ Boxing functions loaded (boxer, box)" -ForegroundColor Green
         }
 
         # Modify PowerShell profile
-        Add-BoxingToProfile
+        Write-Step "Configuring PowerShell profile..."
+
+        # Create profile directory if needed
+        $ProfileDir = Split-Path $ProfilePath -Parent
+        if (-not (Test-Path $ProfileDir)) {
+            New-Item -ItemType Directory -Path $ProfileDir -Force | Out-Null
+        }
+
+        # Read existing profile or create empty
+        $ProfileContent = ""
+        if (Test-Path $ProfilePath) {
+            $ProfileContent = Get-Content $ProfilePath -Raw
+        }
+
+        # Check if #region boxing already exists
+        if ($ProfileContent -match '#region boxing') {
+            Write-Success "Profile ready"
+        } else {
+            # Add Boxing region to profile (lightweight dot-source approach)
+            $BoxingRegion = @"
+
+#region boxing
+`$boxingInit = "`$env:USERPROFILE\Documents\PowerShell\Boxing\init.ps1"
+if (Test-Path `$boxingInit) {
+    . `$boxingInit
+}
+#endregion boxing
+"@
+
+            # Append to profile
+            $ProfileContent += $BoxingRegion
+            Set-Content -Path $ProfilePath -Value $ProfileContent -Encoding UTF8
+            Write-Success "Profile configured"
+        }
 
         # Install box if this is a box repository (not Boxing main repo)
         if ($SourceRepo) {
@@ -1303,7 +1336,8 @@ Write-Host "✓ Boxing functions loaded (boxer, box)" -ForegroundColor Green
         }
 
         # Determine if we need to load functions in current session
-        $FunctionsNeedLoading = -not (Get-Command -Name boxer -ErrorAction SilentlyContinue)
+        $ProfileNeedsConfig = -not ($ProfileContent -match '#region boxing')
+        $FunctionsNeedLoading = $ProfileNeedsConfig -or -not (Get-Command -Name boxer -ErrorAction SilentlyContinue)
 
         # Load functions in current session only if needed (profile not configured or function missing)
         if ($FunctionsNeedLoading) {
@@ -1341,25 +1375,21 @@ Write-Host "✓ Boxing functions loaded (boxer, box)" -ForegroundColor Green
 
                 & $boxScript @args
             }
-            
-            Write-Success "✓ Boxing functions loaded (boxer, box)"
         }
 
         # Display appropriate completion message
         if (-not $BoxerAlreadyInstalled) {
             # First installation
+            Write-Success "✓ Boxing functions loaded (boxer, box)"
             Write-Success "Boxing system installed successfully!"
             Write-Host ""
             Write-Host "  Ready to use! Try:" -ForegroundColor Cyan
             Write-Host "    boxer init MyProject" -ForegroundColor White
             Write-Host ""
-        } else {
-            # Update completed
-            Write-Host ""
-            Write-Host "  ✓ Boxer updated successfully!" -ForegroundColor Green
-            Write-Host "  Ready to use: boxer init MyProject" -ForegroundColor Cyan
-            Write-Host ""
+            Write-Host "  💡 Recommended: Restart PowerShell for permanent installation" -ForegroundColor Yellow
+            Write-Host "     (functions work now, but restart ensures they persist)" -ForegroundColor DarkGray
         }
+        # Update or already up-to-date: no additional message needed
 
     } catch {
         Write-Host "Installation failed: $_" -ForegroundColor Red
@@ -1853,136 +1883,6 @@ function Get-RemoteBoxVersion {
     return $null
 }
 
-# ============================================================================
-# PowerShell Profile Integration
-# ============================================================================
-
-function Add-BoxingToProfile {
-    <#
-    .SYNOPSIS
-    Adds boxer and box functions to PowerShell profile for automatic availability.
-
-    .DESCRIPTION
-    Integrates Boxing System into user's PowerShell profile by adding:
-    - boxer() function wrapper for global box management
-    - box() function wrapper for project commands
-
-    Uses #region boxing markers for idempotent operation (won't duplicate on reinstall).
-
-    .EXAMPLE
-    Add-BoxingToProfile
-    #>
-
-    try {
-        # Determine profile path
-        $ProfilePath = $PROFILE.CurrentUserAllHosts
-        $BoxerPath = Join-Path $env:USERPROFILE "Documents\PowerShell\Boxing\boxer.ps1"
-
-        Write-Step "Integrating Boxing into PowerShell profile..."
-
-        # Create profile directory if needed
-        $ProfileDir = Split-Path $ProfilePath -Parent
-        if (-not (Test-Path $ProfileDir)) {
-            Write-Verbose "Creating profile directory: $ProfileDir"
-            New-Item -ItemType Directory -Path $ProfileDir -Force | Out-Null
-        }
-
-        # Check if profile already has boxing region
-        $hasBoxingRegion = $false
-        if (Test-Path $ProfilePath) {
-            $profileContent = Get-Content $ProfilePath -Raw
-            if ($profileContent -match '#region boxing') {
-                $hasBoxingRegion = $true
-            }
-        }
-
-        if ($hasBoxingRegion) {
-            Write-Host "  ✓ Boxing already integrated in profile (idempotent)" -ForegroundColor Green
-            return
-        }
-
-        # Profile content to add
-        $boxingRegion = @"
-
-#region boxing
-# Boxing System Integration
-# Auto-generated by boxer installation
-
-function boxer {
-    `$boxerPath = "$BoxerPath"
-    if (Test-Path `$boxerPath) {
-        & `$boxerPath `$args
-    } else {
-        Write-Error "boxer.ps1 not found at `$boxerPath. Please reinstall Boxing System."
-    }
-}
-
-function box {
-    # Search for box.ps1 in current directory and parent directories
-    `$currentDir = Get-Location
-    `$searchPath = `$currentDir
-    `$maxDepth = 5  # Prevent infinite loops
-    `$depth = 0
-
-    while (`$depth -lt `$maxDepth) {
-        `$boxPath = Join-Path `$searchPath "box.ps1"
-        if (Test-Path `$boxPath) {
-            & `$boxPath `$args
-            return
-        }
-
-        # Move to parent directory
-        `$parent = Split-Path `$searchPath -Parent
-        if (-not `$parent -or `$parent -eq `$searchPath) {
-            break  # Reached filesystem root
-        }
-        `$searchPath = `$parent
-        `$depth++
-    }
-
-    Write-Error "box.ps1 not found in current directory or parent directories (searched up to `$depth levels)"
-}
-
-#endregion boxing
-"@
-
-        # Append to profile
-        if (-not (Test-Path $ProfilePath)) {
-            # Create new profile
-            $boxingRegion | Set-Content -Path $ProfilePath -Encoding UTF8
-            Write-Host "  ✓ Created profile with Boxing integration" -ForegroundColor Green
-        } else {
-            # Append to existing profile
-            $boxingRegion | Add-Content -Path $ProfilePath -Encoding UTF8
-            Write-Host "  ✓ Added Boxing integration to existing profile" -ForegroundColor Green
-        }
-
-        Write-Host ""
-        Write-Host "  PowerShell profile updated successfully!" -ForegroundColor Cyan
-        Write-Host "  Location: $ProfilePath" -ForegroundColor DarkGray
-        Write-Host ""
-        Write-Host "  To use boxer and box in this session, run:" -ForegroundColor Yellow
-        Write-Host "    . `$PROFILE" -ForegroundColor White
-        Write-Host ""
-        Write-Host "  Or simply open a new PowerShell window." -ForegroundColor Yellow
-        Write-Host ""
-
-    } catch {
-        # Handle permission errors gracefully
-        if ($_.Exception.Message -match "Access.*denied|UnauthorizedAccessException") {
-            Write-Host ""
-            Write-Host "  ⚠ Profile integration failed: Permission denied" -ForegroundColor Yellow
-            Write-Host ""
-            Write-Host "  To fix this:" -ForegroundColor Cyan
-            Write-Host "    1. Run PowerShell as Administrator" -ForegroundColor White
-            Write-Host "    2. Or manually add boxing functions to your profile:" -ForegroundColor White
-            Write-Host "       notepad `$PROFILE" -ForegroundColor DarkGray
-            Write-Host ""
-        } else {
-            Write-Warning "Profile integration failed: $($_.Exception.Message)"
-        }
-    }
-}
 
 # END modules/boxer/install.ps1
 # BEGIN modules/boxer/list.ps1
