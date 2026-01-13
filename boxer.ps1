@@ -6,8 +6,8 @@
     Standalone boxer.ps1 with embedded modules
 
 .NOTES
-    Build Date: 2026-01-13 02:00:08
-    Version: 0.1.94
+    Build Date: 2026-01-13 02:28:00
+    Version: 0.1.96
 #>
 
 param(
@@ -25,7 +25,7 @@ $ErrorActionPreference = 'Stop'
 $script:IsEmbedded = $true
 
 # Embedded version information (injected by build script)
-$script:BoxerVersion = "0.1.94"
+$script:BoxerVersion = "0.1.96"
 
 # BEGIN boxing.ps1
 # Boxing - Common bootstrapper for boxer and box
@@ -1309,8 +1309,10 @@ Write-Host "✓ Boxing functions loaded (boxer, box)" -ForegroundColor Green
             $ProfileContent = Get-Content $ProfilePath -Raw
         }
 
-        # Check if #region boxing already exists
-        if ($ProfileContent -match '#region boxing') {
+        # Check if #region boxing already exists BEFORE modifying profile
+        $ProfileAlreadyConfigured = $ProfileContent -match '#region boxing'
+        
+        if ($ProfileAlreadyConfigured) {
             Write-Success "Profile ready"
         } else {
             # Add Boxing region to profile (lightweight dot-source approach)
@@ -1335,9 +1337,10 @@ if (Test-Path `$boxingInit) {
             Install-CurrentBox -BoxName $SourceRepo -BoxingDir $BoxingDir
         }
 
-        # Determine if we need to load functions in current session
-        $ProfileNeedsConfig = -not ($ProfileContent -match '#region boxing')
-        $FunctionsNeedLoading = $ProfileNeedsConfig -or -not (Get-Command -Name boxer -ErrorAction SilentlyContinue)
+        # Load functions in current session if:
+        # 1. Profile wasn't configured (just added region) → user needs functions NOW
+        # 2. Functions not available (update scenario or manual profile edit) → reload needed
+        $FunctionsNeedLoading = -not $ProfileAlreadyConfigured -or -not (Get-Command -Name boxer -ErrorAction SilentlyContinue)
 
         # Load functions in current session only if needed (profile not configured or function missing)
         if ($FunctionsNeedLoading) {
@@ -1375,19 +1378,21 @@ if (Test-Path `$boxingInit) {
 
                 & $boxScript @args
             }
+            
+            Write-Success "✓ Boxing functions loaded (boxer, box)"
         }
 
         # Display appropriate completion message
         if (-not $BoxerAlreadyInstalled) {
             # First installation
-            Write-Success "✓ Boxing functions loaded (boxer, box)"
             Write-Success "Boxing system installed successfully!"
             Write-Host ""
             Write-Host "  Ready to use! Try:" -ForegroundColor Cyan
             Write-Host "    boxer init MyProject" -ForegroundColor White
             Write-Host ""
-            Write-Host "  💡 Recommended: Restart PowerShell for permanent installation" -ForegroundColor Yellow
-            Write-Host "     (functions work now, but restart ensures they persist)" -ForegroundColor DarkGray
+            if (-not $FunctionsNeedLoading) {
+                Write-Host "  💡 Restart PowerShell to activate boxing commands" -ForegroundColor Yellow
+            }
         }
         # Update or already up-to-date: no additional message needed
 
