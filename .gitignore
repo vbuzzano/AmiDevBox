@@ -1,0 +1,34 @@
+# Compiled outputs
+/dist/
+
+# PowerShell
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Temporary files
+*.tmp
+*.temp
+_*_
+_*
+*_
+~*
+
+
+# local files
+.box/
+.vscode/
+.github/
+.specify/
+specs/
+analyse-*/*
+archive-*/*

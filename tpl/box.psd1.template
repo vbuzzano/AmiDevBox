@@ -1,0 +1,77 @@
+# ============================================================================
+# Boxing - Project Configuration
+# ============================================================================
+# This file contains project-specific settings and package dependencies.
+# Edit this file to customize your development environment.
+# ============================================================================
+
+@{
+    # ========================================================================
+    # Project Information
+    # ========================================================================
+    Project = @{
+        Name        = '{{PROJECT_NAME}}'
+        Description = '{{DESCRIPTION}}'
+        Version     = '0.1.0'
+        Author      = ''
+    }
+
+    # ========================================================================
+    # Custom Environment Variables (added to .env)
+    # ========================================================================
+    # These variables are automatically exported when running 'box install'
+    # ========================================================================
+    Envs = @{
+        # Example:
+        # PROJECT_ROOT = '$pwd'
+        # OUTPUT_DIR   = 'build'
+    }
+
+    # ========================================================================
+    # Package Dependencies
+    # ========================================================================
+    # Add packages from registries or custom URLs
+    # After editing, run: box install
+    # ========================================================================
+    Packages = @(
+        # Example package from Aminet:
+        # @{
+        #     Name        = "vbcc"
+        #     Url         = "https://aminet.net/dev/c/vbcc.lha"
+        #     File        = "vbcc.lha"
+        #     Description = "VBCC C compiler for Amiga"
+        #     Archive     = "lha"
+        #     Mode        = "auto"
+        #     Extract     = @(
+        #         "SDK:vbcc/*:vendor/vbcc:VBCC_PATH"
+        #         "INC:vbcc/include/*:include"
+        #     )
+        # }
+    )
+
+    # ========================================================================
+    # Build Configuration
+    # ========================================================================
+    # These settings are automatically exported to .env for use in Makefile
+    # Variable names in this section are used as-is (no transformation)
+    # ========================================================================
+    Build = @{
+        # Executable name (if building binary)
+        # PROGRAM_NAME = '{{PROJECT_NAME}}'
+
+        # Default CPU target (68000, 68020, 68040, 68060, 68080)
+        DEFAULT_CPU = '68020'
+
+        # Default FPU (empty, 68881, 68882, 68040, 68060, 68080)
+        DEFAULT_FPU = ''
+
+        # Project paths
+        SRC_DIR     = 'src'
+        INCLUDE_DIR = 'include'
+        BUILD_DIR   = 'build'
+        ASM_DIR     = 'build/asm'
+        OBJ_DIR     = 'build/obj'
+        DIST_DIR    = 'dist'
+        VENDOR_DIR  = 'vendor'
+    }
+}
