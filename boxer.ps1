@@ -6,8 +6,8 @@
     Standalone boxer.ps1 with embedded modules
 
 .NOTES
-    Build Date: 2026-01-13 20:59:35
-    Version: 0.1.108
+    Build Date: 2026-01-13 21:17:17
+    Version: 0.1.109
 #>
 
 param(
@@ -25,7 +25,7 @@ $ErrorActionPreference = 'Stop'
 $script:IsEmbedded = $true
 
 # Embedded version information (injected by build script)
-$script:BoxerVersion = "0.1.108"
+$script:BoxerVersion = "0.1.109"
 
 # BEGIN boxing.ps1
 # Boxing - Common bootstrapper for boxer and box
@@ -1309,26 +1309,8 @@ Write-Host "✓ Boxing functions loaded (boxer, box)" -ForegroundColor Green
             $ProfileContent = Get-Content $ProfilePath -Raw
         }
 
-        # Check if #region boxing already exists
-        if ($ProfileContent -match '#region boxing') {
-            Write-Success "Profile ready"
-        } else {
-            # Add Boxing region to profile (lightweight dot-source approach)
-            $BoxingRegion = @"
-
-#region boxing
-`$boxingInit = "`$env:USERPROFILE\Documents\PowerShell\Boxing\init.ps1"
-if (Test-Path `$boxingInit) {
-    . `$boxingInit
-}
-#endregion boxing
-"@
-
-            # Append to profile
-            $ProfileContent += $BoxingRegion
-            Set-Content -Path $ProfilePath -Value $ProfileContent -Encoding UTF8
-            Write-Success "Profile configured"
-        }
+        # Check if profile already configured BEFORE modifying anything
+        $ProfileIsReady = $ProfileContent -match '#region boxing'
 
         # Install box if this is a box repository (not Boxing main repo)
         if ($SourceRepo) {
@@ -1336,9 +1318,7 @@ if (Test-Path `$boxingInit) {
         }
 
         # Determine if we need to load functions in current session
-        # Always load on first install, or if profile wasn't configured, or if functions are missing
-        $ProfileNeedsConfig = -not ($ProfileContent -match '#region boxing')
-        $FunctionsNeedLoading = (-not $BoxerAlreadyInstalled) -or $ProfileNeedsConfig -or -not (Get-Command -Name boxer -ErrorAction SilentlyContinue)
+        $FunctionsNeedLoading = (-not $ProfileIsReady) -or -not (Get-Command -Name boxer -ErrorAction SilentlyContinue)
 
         # Load functions in current session only if needed
         if ($FunctionsNeedLoading) {
@@ -1376,6 +1356,27 @@ if (Test-Path `$boxingInit) {
 
                 & $boxScript @args
             }
+        }
+
+        # Configure profile if needed (AFTER loading functions in current session)
+        if (-not $ProfileIsReady) {
+            # Add Boxing region to profile (lightweight dot-source approach)
+            $BoxingRegion = @"
+
+#region boxing
+`$boxingInit = "`$env:USERPROFILE\Documents\PowerShell\Boxing\init.ps1"
+if (Test-Path `$boxingInit) {
+    . `$boxingInit
+}
+#endregion boxing
+"@
+
+            # Append to profile
+            $ProfileContent += $BoxingRegion
+            Set-Content -Path $ProfilePath -Value $ProfileContent -Encoding UTF8
+            Write-Success "Profile configured"
+        } else {
+            Write-Success "Profile ready"
         }
 
         # Display appropriate completion message
