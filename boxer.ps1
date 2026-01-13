@@ -6,8 +6,8 @@
     Standalone boxer.ps1 with embedded modules
 
 .NOTES
-    Build Date: 2026-01-13 22:06:30
-    Version: 0.1.110
+    Build Date: 2026-01-13 22:08:33
+    Version: 0.1.111
 #>
 
 param(
@@ -25,7 +25,7 @@ $ErrorActionPreference = 'Stop'
 $script:IsEmbedded = $true
 
 # Embedded version information (injected by build script)
-$script:BoxerVersion = "0.1.110"
+$script:BoxerVersion = "0.1.111"
 
 # BEGIN boxing.ps1
 # Boxing - Common bootstrapper for boxer and box
@@ -1311,6 +1311,7 @@ Write-Host "✓ Boxing functions loaded (boxer, box)" -ForegroundColor Green
 
         # Check if profile already configured BEFORE modifying anything
         $ProfileIsReady = $ProfileContent -match '#region boxing'
+        Write-Host "DEBUG: ProfileIsReady = $ProfileIsReady" -ForegroundColor Magenta
 
         # Install box if this is a box repository (not Boxing main repo)
         if ($SourceRepo) {
@@ -1318,10 +1319,14 @@ Write-Host "✓ Boxing functions loaded (boxer, box)" -ForegroundColor Green
         }
 
         # Determine if we need to load functions in current session
-        $FunctionsNeedLoading = (-not $ProfileIsReady) -or -not (Get-Command -Name boxer -ErrorAction SilentlyContinue)
+        $BoxerExists = Get-Command -Name boxer -ErrorAction SilentlyContinue
+        Write-Host "DEBUG: BoxerExists = $($null -ne $BoxerExists)" -ForegroundColor Magenta
+        $FunctionsNeedLoading = (-not $ProfileIsReady) -or -not $BoxerExists
+        Write-Host "DEBUG: FunctionsNeedLoading = $FunctionsNeedLoading" -ForegroundColor Magenta
 
         # Load functions in current session only if needed
         if ($FunctionsNeedLoading) {
+            Write-Host "DEBUG: ENTERING IF BLOCK - LOADING FUNCTIONS" -ForegroundColor Yellow
             $global:function:boxer = {
                 $boxerPath = "$env:USERPROFILE\Documents\PowerShell\Boxing\boxer.ps1"
                 if (Test-Path $boxerPath) {
