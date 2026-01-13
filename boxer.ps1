@@ -6,8 +6,8 @@
     Standalone boxer.ps1 with embedded modules
 
 .NOTES
-    Build Date: 2026-01-13 04:02:21
-    Version: 0.1.97
+    Build Date: 2026-01-13 19:04:39
+    Version: 0.1.99
 #>
 
 param(
@@ -25,7 +25,7 @@ $ErrorActionPreference = 'Stop'
 $script:IsEmbedded = $true
 
 # Embedded version information (injected by build script)
-$script:BoxerVersion = "0.1.97"
+$script:BoxerVersion = "0.1.99"
 
 # BEGIN boxing.ps1
 # Boxing - Common bootstrapper for boxer and box
@@ -1309,10 +1309,8 @@ Write-Host "✓ Boxing functions loaded (boxer, box)" -ForegroundColor Green
             $ProfileContent = Get-Content $ProfilePath -Raw
         }
 
-        # Check if #region boxing already exists BEFORE modifying profile
-        $ProfileAlreadyConfigured = $ProfileContent -match '#region boxing'
-        
-        if ($ProfileAlreadyConfigured) {
+        # Check if #region boxing already exists
+        if ($ProfileContent -match '#region boxing') {
             Write-Success "Profile ready"
         } else {
             # Add Boxing region to profile (lightweight dot-source approach)
@@ -1337,10 +1335,9 @@ if (Test-Path `$boxingInit) {
             Install-CurrentBox -BoxName $SourceRepo -BoxingDir $BoxingDir
         }
 
-        # Load functions in current session if:
-        # 1. Profile wasn't configured (just added region) → user needs functions NOW
-        # 2. Functions not available (update scenario or manual profile edit) → reload needed
-        $FunctionsNeedLoading = -not $ProfileAlreadyConfigured -or -not (Get-Command -Name boxer -ErrorAction SilentlyContinue)
+        # Determine if we need to load functions in current session
+        $ProfileNeedsConfig = -not ($ProfileContent -match '#region boxing')
+        $FunctionsNeedLoading = $ProfileNeedsConfig -or -not (Get-Command -Name boxer -ErrorAction SilentlyContinue)
 
         # Load functions in current session only if needed (profile not configured or function missing)
         if ($FunctionsNeedLoading) {
