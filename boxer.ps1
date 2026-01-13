@@ -6,8 +6,8 @@
     Standalone boxer.ps1 with embedded modules
 
 .NOTES
-    Build Date: 2026-01-13 20:58:25
-    Version: 0.1.107
+    Build Date: 2026-01-13 20:59:35
+    Version: 0.1.108
 #>
 
 param(
@@ -25,7 +25,7 @@ $ErrorActionPreference = 'Stop'
 $script:IsEmbedded = $true
 
 # Embedded version information (injected by build script)
-$script:BoxerVersion = "0.1.107"
+$script:BoxerVersion = "0.1.108"
 
 # BEGIN boxing.ps1
 # Boxing - Common bootstrapper for boxer and box
@@ -1336,12 +1336,12 @@ if (Test-Path `$boxingInit) {
         }
 
         # Determine if we need to load functions in current session
+        # Always load on first install, or if profile wasn't configured, or if functions are missing
         $ProfileNeedsConfig = -not ($ProfileContent -match '#region boxing')
-        $FunctionsNeedLoading = $ProfileNeedsConfig -or -not (Get-Command -Name boxer -ErrorAction SilentlyContinue)
+        $FunctionsNeedLoading = (-not $BoxerAlreadyInstalled) -or $ProfileNeedsConfig -or -not (Get-Command -Name boxer -ErrorAction SilentlyContinue)
 
-        # Load functions in current session only if needed (profile not configured or function missing)
+        # Load functions in current session only if needed
         if ($FunctionsNeedLoading) {
-            echo "OKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKK"
             $global:function:boxer = {
                 $boxerPath = "$env:USERPROFILE\Documents\PowerShell\Boxing\boxer.ps1"
                 if (Test-Path $boxerPath) {
