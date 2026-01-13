@@ -6,8 +6,8 @@
     Standalone box.ps1 with embedded modules
 
 .NOTES
-    Build Date: 2026-01-13 19:13:52
-    Version: 0.1.100
+    Build Date: 2026-01-13 20:05:46
+    Version: 0.1.101
 #>
 
 param(
@@ -25,7 +25,7 @@ $ErrorActionPreference = 'Stop'
 # ============================================================================
 
 # Embedded version information (injected by build script)
-$script:BoxerVersion = "0.1.100"
+$script:BoxerVersion = "0.1.101"
 
 $BaseDir = Get-Location
 $BoxDir = $null

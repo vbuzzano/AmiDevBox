@@ -6,8 +6,8 @@
     Standalone boxer.ps1 with embedded modules
 
 .NOTES
-    Build Date: 2026-01-13 19:13:52
-    Version: 0.1.100
+    Build Date: 2026-01-13 20:05:46
+    Version: 0.1.101
 #>
 
 param(
@@ -25,7 +25,7 @@ $ErrorActionPreference = 'Stop'
 $script:IsEmbedded = $true
 
 # Embedded version information (injected by build script)
-$script:BoxerVersion = "0.1.100"
+$script:BoxerVersion = "0.1.101"
 
 # BEGIN boxing.ps1
 # Boxing - Common bootstrapper for boxer and box
@@ -1334,47 +1334,45 @@ if (Test-Path `$boxingInit) {
         if ($SourceRepo) {
             Install-CurrentBox -BoxName $SourceRepo -BoxingDir $BoxingDir
         }
+        # Install box if this is a box repository (not Boxing main repo)
+        if ($SourceRepo) {
+            Install-CurrentBox -BoxName $SourceRepo -BoxingDir $BoxingDir
+        }
 
-        # Determine if we need to load functions in current session
-        $ProfileNeedsConfig = -not ($ProfileContent -match '#region boxing')
-        $FunctionsNeedLoading = $ProfileNeedsConfig -or -not (Get-Command -Name boxer -ErrorAction SilentlyContinue)
+        # Always load functions in current session (irm|iex requires $global:function:)
+        $global:function:boxer = {
+            $boxerPath = "$env:USERPROFILE\Documents\PowerShell\Boxing\boxer.ps1"
+            if (Test-Path $boxerPath) {
+                & $boxerPath @args
+            } else {
+                Write-Host "Error: boxer.ps1 not found at $boxerPath" -ForegroundColor Red
+            }
+        }
 
-        # Load functions in current session only if needed (profile not configured or function missing)
-        if ($FunctionsNeedLoading) {
-            $global:function:boxer = {
-                $boxerPath = "$env:USERPROFILE\Documents\PowerShell\Boxing\boxer.ps1"
-                if (Test-Path $boxerPath) {
-                    & $boxerPath @args
-                } else {
-                    Write-Host "Error: boxer.ps1 not found at $boxerPath" -ForegroundColor Red
+        $global:function:box = {
+            $boxScript = $null
+            $current = (Get-Location).Path
+
+            while ($current -ne [System.IO.Path]::GetPathRoot($current)) {
+                $testPath = Join-Path $current ".box\box.ps1"
+                if (Test-Path $testPath) {
+                    $boxScript = $testPath
+                    break
                 }
+                $parent = Split-Path $current -Parent
+                if (-not $parent) { break }
+                $current = $parent
             }
 
-            $global:function:box = {
-                $boxScript = $null
-                $current = (Get-Location).Path
-
-                while ($current -ne [System.IO.Path]::GetPathRoot($current)) {
-                    $testPath = Join-Path $current ".box\box.ps1"
-                    if (Test-Path $testPath) {
-                        $boxScript = $testPath
-                        break
-                    }
-                    $parent = Split-Path $current -Parent
-                    if (-not $parent) { break }
-                    $current = $parent
-                }
-
-                if (-not $boxScript) {
-                    Write-Host "❌ No box project found" -ForegroundColor Red
-                    Write-Host ""
-                    Write-Host "Create a new project:" -ForegroundColor Cyan
-                    Write-Host "  boxer init MyProject" -ForegroundColor White
-                    return
-                }
-
-                & $boxScript @args
+            if (-not $boxScript) {
+                Write-Host "❌ No box project found" -ForegroundColor Red
+                Write-Host ""
+                Write-Host "Create a new project:" -ForegroundColor Cyan
+                Write-Host "  boxer init MyProject" -ForegroundColor White
+                return
             }
+
+            & $boxScript @args
         }
 
         # Display appropriate completion message
@@ -1390,10 +1388,6 @@ if (Test-Path `$boxingInit) {
             Write-Host "     (functions work now, but restart ensures they persist)" -ForegroundColor DarkGray
         }
         # Update or already up-to-date: no additional message needed
-
-    } catch {
-        Write-Host "Installation failed: $_" -ForegroundColor Red
-        throw
     }
 }
 
