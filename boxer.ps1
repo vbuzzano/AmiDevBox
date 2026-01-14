@@ -6,8 +6,8 @@
     Standalone boxer.ps1 with embedded modules
 
 .NOTES
-    Build Date: 2026-01-14 19:05:45
-    Version: 0.1.115
+    Build Date: 2026-01-14 22:51:50
+    Version: 0.1.119
 #>
 
 param(
@@ -25,7 +25,7 @@ $ErrorActionPreference = 'Stop'
 $script:IsEmbedded = $true
 
 # Embedded version information (injected by build script)
-$script:BoxerVersion = "0.1.115"
+$script:BoxerVersion = "0.1.119"
 
 # BEGIN boxing.ps1
 # Boxing - Common bootstrapper for boxer and box
@@ -309,6 +309,10 @@ function Invoke-Command {
     )
 
     if (-not $script:Commands.ContainsKey($CommandName)) {
+        if ($CommandName -eq 'help') {
+            Show-Help
+            return 0
+        }
         Write-Error "Unknown command: $CommandName"
         Show-Help
         return 1
@@ -1439,7 +1443,7 @@ if (Test-Path `$boxingInit) {
             Write-Host "    boxer init MyProject" -ForegroundColor White
             Write-Host ""
             Write-Host "  💡 Recommended: Restart PowerShell for permanent installation" -ForegroundColor Yellow
-            Write-Host "     (functions work now, but restart ensures they persist)" -ForegroundColor DarkGray
+            Write-Host ""
         }
         # Update or already up-to-date: no additional message needed
 

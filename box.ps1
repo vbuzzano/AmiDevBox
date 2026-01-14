@@ -1,13 +1,13 @@
 <#
 .SYNOPSIS
-    Box - Project Workspace Manager
+    AmiDevBox - Complete Amiga development environment setup system
 
 .DESCRIPTION
     Standalone box.ps1 with embedded modules
 
 .NOTES
-    Build Date: 2026-01-14 19:05:46
-    Version: 0.1.115
+    Build Date: 2026-01-14
+    Version: 0.1.87
 #>
 
 param(
@@ -25,7 +25,7 @@ $ErrorActionPreference = 'Stop'
 # ============================================================================
 
 # Embedded version information (injected by build script)
-$script:BoxerVersion = "0.1.115"
+$script:BoxerVersion = "0.1.87"
 
 $BaseDir = Get-Location
 $BoxDir = $null
@@ -338,6 +338,10 @@ function Invoke-Command {
     )
 
     if (-not $script:Commands.ContainsKey($CommandName)) {
+        if ($CommandName -eq 'help') {
+            Show-Help
+            return 0
+        }
         Write-Error "Unknown command: $CommandName"
         Show-Help
         return 1
@@ -2002,7 +2006,7 @@ function Ensure-SevenZip {
 # BEGIN core/templates.ps1
 <#
 .SYNOPSIS
-    Template processor module for DevBox
+    AmiDevBox - Complete Amiga development environment setup system
 
 .DESCRIPTION
     Provides functions to load variables, process templates with token replacement,
@@ -2010,7 +2014,7 @@ function Ensure-SevenZip {
 
 .NOTES
     Module: templates.ps1
-    Version: 0.1.0
+    Version: 0.1.87
 #>
 
 # ============================================================================
@@ -4544,4 +4548,5 @@ if ($Arguments) {
 
 # Call main bootstrapper with all arguments
 Initialize-Boxing -Arguments $allArgs
+
 
