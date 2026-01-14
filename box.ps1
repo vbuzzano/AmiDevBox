@@ -6,8 +6,8 @@
     Standalone box.ps1 with embedded modules
 
 .NOTES
-    Build Date: 2026-01-13 22:58:32
-    Version: 0.1.114
+    Build Date: 2026-01-14 19:05:46
+    Version: 0.1.115
 #>
 
 param(
@@ -25,7 +25,7 @@ $ErrorActionPreference = 'Stop'
 # ============================================================================
 
 # Embedded version information (injected by build script)
-$script:BoxerVersion = "0.1.114"
+$script:BoxerVersion = "0.1.115"
 
 $BaseDir = Get-Location
 $BoxDir = $null
@@ -180,6 +180,9 @@ function Import-ModeModules {
                     Source = 'core'
                 }
             }
+            else {
+                Write-Verbose "Override applied for ${commandName}: skipping core module $($file.FullName)"
+            }
         }
     }
 
@@ -214,22 +217,22 @@ function Register-EmbeddedCommands {
 
     # For embedded versions, discover commands dynamically by scanning loaded functions
     $prefix = "Invoke-$Mode-"
-    $functions = Get-Command -Name "$prefix*" -CommandType Function -ErrorAction SilentlyContinue
+    $functions = Get-Command -Name "$prefix*" -CommandType Function -ErrorAction SilentlyContinue | Sort-Object Name
+    $registered = @{}
 
     foreach ($func in $functions) {
         $funcName = $func.Name
-        # Extract command name: Invoke-Box-Install → install, Invoke-Box-Env-List → env
-        $commandName = $funcName.Substring($prefix.Length).ToLower()
+        $namePart = $funcName.Substring($prefix.Length)
+        $commandName = ($namePart -split '-', 2)[0].ToLower()
 
-        # For sub-commands (env-list), keep only base command
-        if ($commandName -match '^([^-]+)-') {
-            $commandName = $matches[1]
+        if ($registered.ContainsKey($commandName) -or $script:Commands.ContainsKey($commandName)) {
+            Write-Verbose "Skipping duplicate embedded command: $commandName from $funcName"
+            continue
         }
 
-        if (-not $script:Commands.ContainsKey($commandName)) {
-            $script:Commands[$commandName] = $funcName
-            Write-Verbose "Registered command: $commandName → $funcName"
-        }
+        $script:Commands[$commandName] = $funcName
+        $registered[$commandName] = $true
+        Write-Verbose "Registered embedded command: $commandName → $funcName"
     }
 }
 
@@ -248,35 +251,82 @@ function Import-SharedModules {
         return
     }
 
-    # Load complex modules with metadata
-    $metadataFiles = Get-ChildItem -Path $sharedPath -Filter 'metadata.psd1' -Recurse
+    $moduleDirs = Get-ChildItem -Path $sharedPath -Directory -Recurse
 
-    foreach ($metaFile in $metadataFiles) {
-        try {
-            $metadata = Import-PowerShellDataFile -Path $metaFile.FullName
-            $moduleName = $metadata.ModuleName
-            $moduleDir = $metaFile.Directory.FullName
+    foreach ($moduleDir in $moduleDirs) {
+        $metadataPath = Join-Path $moduleDir.FullName 'metadata.psd1'
+        if (-not (Test-Path $metadataPath)) {
+            throw "Shared module missing metadata.psd1: $($moduleDir.FullName)"
+        }
 
-            # Load all .ps1 files in the module directory
-            $moduleFiles = Get-ChildItem -Path $moduleDir -Filter '*.ps1'
+        $metadata = Import-PowerShellDataFile -Path $metadataPath
 
-            foreach ($file in $moduleFiles) {
-                . $file.FullName
-                Write-Verbose "Loaded shared module: $moduleName/$($file.Name)"
+        $missingKeys = @()
+        if (-not $metadata.ContainsKey('ModuleName') -or [string]::IsNullOrWhiteSpace($metadata.ModuleName)) {
+            $missingKeys += 'ModuleName'
+        }
+        if (-not $metadata.ContainsKey('Commands') -or -not $metadata.Commands -or $metadata.Commands.Count -eq 0) {
+            $missingKeys += 'Commands'
+        }
+
+        if ($missingKeys.Count -gt 0) {
+            throw "Shared module $($moduleDir.FullName) missing required metadata keys: $($missingKeys -join ', ')"
+        }
+
+        $moduleName = $metadata.ModuleName
+        $privateFunctions = @()
+        if ($metadata.ContainsKey('PrivateFunctions')) {
+            $privateFunctions = $metadata.PrivateFunctions
+        }
+
+        $moduleFiles = Get-ChildItem -Path $moduleDir.FullName -Filter '*.ps1'
+
+        foreach ($file in $moduleFiles) {
+            . $file.FullName
+            Write-Verbose "Loaded shared module: $moduleName/$($file.Name)"
+        }
+
+        $missingCommands = @()
+        foreach ($cmd in $metadata.Commands) {
+            $boxFunc = "Invoke-Box-$cmd"
+            $boxerFunc = "Invoke-Boxer-$cmd"
+            $boxCmd = Get-Command -Name $boxFunc -CommandType Function -ErrorAction SilentlyContinue
+            $boxerCmd = Get-Command -Name $boxerFunc -CommandType Function -ErrorAction SilentlyContinue
+
+            $hasEntry = $false
+            if ($boxCmd -and $boxCmd.ScriptBlock.File -like "$($moduleDir.FullName)*") { $hasEntry = $true }
+            if ($boxerCmd -and $boxerCmd.ScriptBlock.File -like "$($moduleDir.FullName)*") { $hasEntry = $true }
+
+            if (-not $hasEntry) {
+                $missingCommands += $cmd
             }
+            else {
+                $script:Commands[$cmd] = $moduleName
+            }
+        }
 
-            # Register module commands
-            if ($metadata.Commands) {
-                foreach ($cmd in $metadata.Commands) {
-                    $script:Commands[$cmd] = $moduleName
+        if ($missingCommands.Count -gt 0) {
+            throw "Shared module $($moduleDir.FullName) missing entrypoints for commands: $($missingCommands -join ', ')"
+        }
+
+        $moduleFunctions = Get-Command -Name 'Invoke-*' -CommandType Function -ErrorAction SilentlyContinue | Where-Object { $_.ScriptBlock.File -like "$($moduleDir.FullName)*" }
+        $unexpected = @()
+        foreach ($func in $moduleFunctions) {
+            if ($func.Name -match '^Invoke-[^-]+-(?<cmd>[^-]+)') {
+                $cmdName = $matches['cmd']
+                if (-not $metadata.Commands -or -not ($metadata.Commands -contains $cmdName)) {
+                    if (-not ($privateFunctions -contains $cmdName)) {
+                        $unexpected += $cmdName
+                    }
                 }
             }
+        }
 
-            $script:LoadedModules[$moduleName] = $moduleDir
+        if ($unexpected.Count -gt 0) {
+            throw "Shared module $($moduleDir.FullName) has undeclared functions: $($unexpected -join ', ')"
         }
-        catch {
-            Write-Warning "Failed to load shared module $($metaFile.Directory.Name): $_"
-        }
+
+        $script:LoadedModules[$moduleName] = $moduleDir.FullName
     }
 }
 
