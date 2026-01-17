@@ -6,8 +6,8 @@
     Standalone boxer.ps1 with embedded modules
 
 .NOTES
-    Build Date: 2026-01-17 20:22:40
-    Version: 0.1.130
+    Build Date: 2026-01-17 21:00:24
+    Version: 0.1.134
 #>
 
 param(
@@ -25,7 +25,7 @@ $ErrorActionPreference = 'Stop'
 $script:IsEmbedded = $true
 
 # Embedded version information (injected by build script)
-$script:BoxerVersion = "0.1.130"
+$script:BoxerVersion = "0.1.134"
 $script:Mode = 'boxer'
 
 # BEGIN boxing.ps1
@@ -380,12 +380,12 @@ function Register-MetadataModule {
 
     foreach ($entry in $metadata.Commands.GetEnumerator()) {
         $cmdName = $entry.Key.ToLower()
-        
+
         if ($cmdName -eq 'help') {
             Write-Warning "Command 'help' is reserved (builtin). Metadata command '$cmdName' in module '$moduleName' ignored."
             continue
         }
-        
+
         if ($script:CommandRegistry.ContainsKey($cmdName)) { continue }
 
         $config = $entry.Value
@@ -541,12 +541,21 @@ function Register-EmbeddedCommands {
         $registered[$commandName] = $true
 
         if (-not $script:CommandRegistry.ContainsKey($commandName)) {
+            # Extract synopsis from function's help comment
+            $helpInfo = Get-Help $funcName -ErrorAction SilentlyContinue
+            $synopsis = if ($helpInfo -and $helpInfo.Synopsis -and $helpInfo.Synopsis -ne $funcName) { 
+                $helpInfo.Synopsis 
+            } else { 
+                $null 
+            }
+
             $script:CommandRegistry[$commandName] = @{
                 Name = $commandName
                 Kind = 'embedded'
                 Source = 'built-in'
                 Handler = $funcName
                 Path = $func.ScriptBlock.File
+                Synopsis = $synopsis
             }
         }
 
@@ -729,7 +738,7 @@ function Invoke-Command {
 
     if ($normalized -eq 'help') {
         Show-Help -CommandPath $Arguments
-        return 0
+        return
     }
 
     if (-not $script:CommandRegistry.ContainsKey($normalized)) {
@@ -1031,10 +1040,13 @@ function Initialize-Boxing {
                 @()
             }
 
-            Invoke-Command -CommandName $command -Arguments $cmdArgs
+            $exitCode = Invoke-Command -CommandName $command -Arguments $cmdArgs
+            if ($exitCode -and $exitCode -ne 0) { return $exitCode }
+            return
         }
         else {
             Show-Help
+            return
         }
     }
     catch {
@@ -2628,7 +2640,10 @@ function Invoke-Boxer-List {
 # Display version information for boxer and installed boxes
 
 function Invoke-Boxer-Version {
-    # Detect version (prefer embedded variable, fallback to file parsing)
+<#
+.SYNOPSIS
+    Display boxer version information
+#>
     $BoxerVersion = if ($script:BoxerVersion) {
         $script:BoxerVersion
     } else {
@@ -2646,5 +2661,5 @@ function Invoke-Boxer-Version {
 
 # Ensure Arguments is an array (can be null in irm|iex context)
 if (-not $Arguments) { $Arguments = @() }
-Initialize-Boxing -Arguments $Arguments | Out-Null
+Initialize-Boxing -Arguments $Arguments
 
