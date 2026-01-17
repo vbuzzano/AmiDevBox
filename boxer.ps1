@@ -6,8 +6,8 @@
     Standalone boxer.ps1 with embedded modules
 
 .NOTES
-    Build Date: 2026-01-17 21:54:45
-    Version: 0.1.139
+    Build Date: 2026-01-17 23:23:55
+    Version: 0.1.142
 #>
 
 param(
@@ -25,7 +25,8 @@ $ErrorActionPreference = 'Stop'
 $script:IsEmbedded = $true
 
 # Embedded version information (injected by build script)
-$script:BoxerVersion = "0.1.139"
+$script:BoxerVersion = "0.1.142"
+$script:BoxName = ""
 $script:Mode = 'boxer'
 
 # BEGIN boxing.ps1
@@ -965,6 +966,72 @@ function Show-Help {
     }
 }
 
+# Update local .box if we're in a project and box matches current source
+function Update-LocalBoxIfNeeded {
+    # Check if .box exists in current directory
+    $localBoxDir = Join-Path (Get-Location) ".box"
+    if (-not (Test-Path $localBoxDir)) {
+        return
+    }
+
+    # Read local box metadata
+    $localMetadataPath = Join-Path $localBoxDir "metadata.psd1"
+    if (-not (Test-Path $localMetadataPath)) {
+        return
+    }
+
+    try {
+        $localMetadata = Import-PowerShellDataFile -Path $localMetadataPath
+        $localBoxName = $localMetadata.BoxName
+        $localVersion = $localMetadata.Version
+
+        # Get current script's box name (embedded variable set at build time)
+        $scriptBoxName = if ($script:BoxName) { $script:BoxName } else { "AmiDevBox" }
+            return
+        }
+
+        # Get new version from current script
+        $newVersion = Get-BoxerVersion
+
+        # Compare versions
+        if ($localVersion -eq $newVersion) {
+            Write-Host ""
+            Write-Host "=== Local .box ===" -ForegroundColor Cyan
+            Write-Host "✓ Already up-to-date (v$localVersion)" -ForegroundColor Green
+            return
+        }
+
+        # Update needed
+        Write-Host ""
+        Write-Host "=== Updating local .box ===" -ForegroundColor Cyan
+        Write-Host "  $localVersion → $newVersion" -ForegroundColor Gray
+
+        # Get source from Boxing/Boxes
+        $BoxingDir = "$env:USERPROFILE\Documents\PowerShell\Boxing"
+        $SourceBoxDir = Join-Path $BoxingDir "Boxes\$scriptBoxName"
+
+        if (-not (Test-Path $SourceBoxDir)) {
+            Write-Host "  ⚠ Source not found, skipping update" -ForegroundColor Yellow
+            return
+        }
+
+        # Remove and recreate .box
+        Remove-Item -Path $localBoxDir -Recurse -Force -ErrorAction Stop
+        Copy-Item -Path $SourceBoxDir -Destination $localBoxDir -Recurse -Force -ErrorAction Stop
+
+        # Remove boxer.ps1 if it was copied (not needed in projects)
+        $boxerInProject = Join-Path $localBoxDir "boxer.ps1"
+        if (Test-Path $boxerInProject) {
+            Remove-Item -Path $boxerInProject -Force
+        }
+
+        Write-Host "✓ Local .box updated to v$newVersion" -ForegroundColor Green
+
+    } catch {
+        Write-Verbose "Failed to update local .box: $_"
+    }
+}
+
 # Main bootstrapping function
 function Initialize-Boxing {
     param(
@@ -991,18 +1058,27 @@ function Initialize-Boxing {
                         Write-Host ""
                         Write-Host "🔄 Boxer update: $InstalledVersion → $CurrentVersion" -ForegroundColor Cyan
                         Install-BoxingSystem | Out-Null
+
+                        # Check if we're in a project directory with .box
+                        Update-LocalBoxIfNeeded
                         return
                     } elseif ($InstalledVersion -and $CurrentVersion) {
                         # Already up-to-date or newer installed
                         Write-Host "✓ Boxer already up-to-date (v$InstalledVersion)" -ForegroundColor Green
                         # Check if box needs update (Install-BoxingSystem handles this)
                         Install-BoxingSystem | Out-Null
+
+                        # Check if we're in a project directory with .box
+                        Update-LocalBoxIfNeeded
                         return
                     }
                 } catch {
                     # Version parsing failed, skip update
                 }
-            } else {
+            } el
+                # Check if we're in a project directory with .box
+                Update-LocalBoxIfNeeded
+                se {
                 # First-time installation
                 Install-BoxingSystem | Out-Null
                 return
@@ -2632,6 +2708,74 @@ function Invoke-Boxer-List {
 }
 
 # END modules/boxer/list.ps1
+# BEGIN modules/boxer/update.ps1
+# Boxer Update Command
+# Updates a box project's .box/ directory
+
+function Invoke-Boxer-Update {
+    <#
+    .SYNOPSIS
+    Updates a box project to the latest version
+
+    .DESCRIPTION
+    Navigates to the specified project directory (or current directory)
+    and executes 'box update' which triggers irm|iex from the box's source repo.
+
+    .PARAMETER Path
+    Path to the box project directory. Defaults to current directory.
+
+    .EXAMPLE
+    boxer update
+
+    .EXAMPLE
+    boxer update C:\Projects\MyProject
+    #>
+    param(
+        [Parameter(Position=0)]
+        [string]$Path = "."
+    )
+
+    # Resolve to absolute path
+    $targetPath = Resolve-Path -Path $Path -ErrorAction SilentlyContinue
+
+    if (-not $targetPath) {
+        Write-Host "❌ Path not found: $Path" -ForegroundColor Red
+        return 1
+    }
+
+    # Check if .box exists
+    $boxDir = Join-Path $targetPath ".box"
+    if (-not (Test-Path $boxDir)) {
+        Write-Host "❌ Not a box project: $targetPath" -ForegroundColor Red
+        Write-Host ""
+        Write-Host "No .box/ directory found" -ForegroundColor Gray
+        return 1
+    }
+
+    # Save current location
+    $originalLocation = Get-Location
+
+    try {
+        # Navigate to project
+        Set-Location $targetPath
+
+        # Check if box.ps1 exists in .box
+        $boxScript = Join-Path $boxDir "box.ps1"
+        if (-not (Test-Path $boxScript)) {
+            Write-Host "❌ Invalid box project: box.ps1 not found in .box/" -ForegroundColor Red
+            return 1
+        }
+
+        # Execute box update
+        & $boxScript update
+
+    } finally {
+        # Restore location
+        Set-Location $originalLocation
+    }
+}
+
+# END modules/boxer/update.ps1
 # BEGIN modules/boxer/version.ps1
 # Boxer Version Command
 # Display version information for boxer and installed boxes

@@ -7,7 +7,7 @@
 
 .NOTES
     Build Date: 2026-01-17
-    Version: 0.1.95
+    Version: 0.1.96
 #>
 
 param(
@@ -25,7 +25,8 @@ $ErrorActionPreference = 'Stop'
 # ============================================================================
 
 # Embedded version information (injected by build script)
-$script:BoxerVersion = "0.1.95"
+$script:BoxerVersion = "0.1.96"
+$script:BoxName = ""
 $script:IsEmbedded = $true
 $script:Mode = 'box'
 
@@ -995,6 +996,72 @@ function Show-Help {
     }
 }
 
+# Update local .box if we're in a project and box matches current source
+function Update-LocalBoxIfNeeded {
+    # Check if .box exists in current directory
+    $localBoxDir = Join-Path (Get-Location) ".box"
+    if (-not (Test-Path $localBoxDir)) {
+        return
+    }
+
+    # Read local box metadata
+    $localMetadataPath = Join-Path $localBoxDir "metadata.psd1"
+    if (-not (Test-Path $localMetadataPath)) {
+        return
+    }
+
+    try {
+        $localMetadata = Import-PowerShellDataFile -Path $localMetadataPath
+        $localBoxName = $localMetadata.BoxName
+        $localVersion = $localMetadata.Version
+
+        # Get current script's box name (embedded variable set at build time)
+        $scriptBoxName = if ($script:BoxName) { $script:BoxName } else { "AmiDevBox" }
+            return
+        }
+
+        # Get new version from current script
+        $newVersion = Get-BoxerVersion
+
+        # Compare versions
+        if ($localVersion -eq $newVersion) {
+            Write-Host ""
+            Write-Host "=== Local .box ===" -ForegroundColor Cyan
+            Write-Host "✓ Already up-to-date (v$localVersion)" -ForegroundColor Green
+            return
+        }
+
+        # Update needed
+        Write-Host ""
+        Write-Host "=== Updating local .box ===" -ForegroundColor Cyan
+        Write-Host "  $localVersion → $newVersion" -ForegroundColor Gray
+
+        # Get source from Boxing/Boxes
+        $BoxingDir = "$env:USERPROFILE\Documents\PowerShell\Boxing"
+        $SourceBoxDir = Join-Path $BoxingDir "Boxes\$scriptBoxName"
+
+        if (-not (Test-Path $SourceBoxDir)) {
+            Write-Host "  ⚠ Source not found, skipping update" -ForegroundColor Yellow
+            return
+        }
+
+        # Remove and recreate .box
+        Remove-Item -Path $localBoxDir -Recurse -Force -ErrorAction Stop
+        Copy-Item -Path $SourceBoxDir -Destination $localBoxDir -Recurse -Force -ErrorAction Stop
+
+        # Remove boxer.ps1 if it was copied (not needed in projects)
+        $boxerInProject = Join-Path $localBoxDir "boxer.ps1"
+        if (Test-Path $boxerInProject) {
+            Remove-Item -Path $boxerInProject -Force
+        }
+
+        Write-Host "✓ Local .box updated to v$newVersion" -ForegroundColor Green
+
+    } catch {
+        Write-Verbose "Failed to update local .box: $_"
+    }
+}
+
 # Main bootstrapping function
 function Initialize-Boxing {
     param(
@@ -1021,18 +1088,27 @@ function Initialize-Boxing {
                         Write-Host ""
                         Write-Host "🔄 Boxer update: $InstalledVersion → $CurrentVersion" -ForegroundColor Cyan
                         Install-BoxingSystem | Out-Null
+
+                        # Check if we're in a project directory with .box
+                        Update-LocalBoxIfNeeded
                         return
                     } elseif ($InstalledVersion -and $CurrentVersion) {
                         # Already up-to-date or newer installed
                         Write-Host "✓ Boxer already up-to-date (v$InstalledVersion)" -ForegroundColor Green
                         # Check if box needs update (Install-BoxingSystem handles this)
                         Install-BoxingSystem | Out-Null
+
+                        # Check if we're in a project directory with .box
+                        Update-LocalBoxIfNeeded
                         return
                     }
                 } catch {
                     # Version parsing failed, skip update
                 }
-            } else {
+            } el
+                # Check if we're in a project directory with .box
+                Update-LocalBoxIfNeeded
+                se {
                 # First-time installation
                 Install-BoxingSystem | Out-Null
                 return
@@ -2239,7 +2315,7 @@ function Ensure-SevenZip {
 
 .NOTES
     Module: templates.ps1
-    Version: 0.1.95
+    Version: 0.1.96
 #>
 
 # ============================================================================
@@ -4264,6 +4340,79 @@ function Invoke-Box-Uninstall {
 }
 
 # END modules/box/uninstall.ps1
+# BEGIN modules/box/update.ps1
+# ============================================================================
+# Box Update Module
+# ============================================================================
+#
+# Updates .box/ directory by re-running irm|iex from source repo
+
+function Invoke-Box-Update {
+    <#
+    .SYNOPSIS
+    Updates .box/ to latest version from source
+
+    .DESCRIPTION
+    Reads .box/metadata.psd1 to find source repository,
+    then executes irm|iex which will update both global Boxing
+    and local .box/ if versions differ.
+
+    .EXAMPLE
+    box update
+    #>
+    param()
+
+    Write-Host ""
+    Write-Host "Updating box..." -ForegroundColor Cyan
+    Write-Host ""
+
+    # Verify we're in a box project
+    if (-not $script:BoxDir -or -not (Test-Path $script:BoxDir)) {
+        Write-Host "❌ Not in a box project" -ForegroundColor Red
+        Write-Host ""
+        Write-Host "Run 'boxer init' to create a new project" -ForegroundColor Gray
+        return 1
+    }
+
+    # Read metadata to get source repository
+    $metadataPath = Join-Path $script:BoxDir "metadata.psd1"
+    if (-not (Test-Path $metadataPath)) {
+        Write-Host "❌ metadata.psd1 not found in .box/" -ForegroundColor Red
+        return 1
+    }
+
+    try {
+        $metadata = Import-PowerShellDataFile -Path $metadataPath
+        $sourceRepo = $metadata.SourceRepo
+
+        if (-not $sourceRepo) {
+            Write-Host "❌ SourceRepo not defined in metadata.psd1" -ForegroundColor Red
+            return 1
+        }
+
+        $boxName = $metadata.BoxName
+        Write-Host "Box: $boxName" -ForegroundColor Gray
+        Write-Host "Source: $sourceRepo" -ForegroundColor Gray
+        Write-Host ""
+
+        # Construct download URL
+        $url = "https://raw.githubusercontent.com/$sourceRepo/main/box.ps1"
+
+        Write-Host "Downloading and executing update..." -ForegroundColor Cyan
+        Write-Host "  $url" -ForegroundColor Gray
+        Write-Host ""
+
+        # Execute irm|iex (will trigger Update-LocalBoxIfNeeded in Initialize-Boxing)
+        Invoke-RestMethod -Uri $url | Invoke-Expression
+
+    } catch {
+        Write-Host ""
+        Write-Host "❌ Update failed: $_" -ForegroundColor Red
+        return 1
+    }
+}
+
+# END modules/box/update.ps1
 # BEGIN modules/box/version.ps1
 # Box Version Command
 # Display box runtime version (simple output like boxer version)
