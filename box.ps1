@@ -7,7 +7,7 @@
 
 .NOTES
     Build Date: 2026-01-17
-    Version: 0.1.97
+    Version: 0.1.98
 #>
 
 param(
@@ -25,7 +25,7 @@ $ErrorActionPreference = 'Stop'
 # ============================================================================
 
 # Embedded version information (injected by build script)
-$script:BoxerVersion = "0.1.97"
+$script:BoxerVersion = "0.1.98"
 $script:BoxName = ""
 $script:IsEmbedded = $true
 $script:Mode = 'box'
@@ -1017,6 +1017,9 @@ function Update-LocalBoxIfNeeded {
 
         # Get current script's box name (embedded variable set at build time)
         $scriptBoxName = if ($script:BoxName) { $script:BoxName } else { "AmiDevBox" }
+        
+        if ($localBoxName -ne $scriptBoxName) {
+            Write-Verbose "Local box is $localBoxName, script is $scriptBoxName - skipping update"
             return
         }
 
@@ -2317,7 +2320,7 @@ function Ensure-SevenZip {
 
 .NOTES
     Module: templates.ps1
-    Version: 0.1.97
+    Version: 0.1.98
 #>
 
 # ============================================================================
