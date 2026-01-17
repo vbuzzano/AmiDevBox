@@ -7,7 +7,7 @@
 
 .NOTES
     Build Date: 2026-01-17
-    Version: 0.1.88
+    Version: 0.1.89
 #>
 
 param(
@@ -25,7 +25,7 @@ $ErrorActionPreference = 'Stop'
 # ============================================================================
 
 # Embedded version information (injected by build script)
-$script:BoxerVersion = "0.1.88"
+$script:BoxerVersion = "0.1.89"
 $script:IsEmbedded = $true
 $script:Mode = 'box'
 
@@ -292,6 +292,11 @@ function Register-ExternalModules {
     foreach ($file in $fileModules) {
         $commandName = [System.IO.Path]::GetFileNameWithoutExtension($file.Name).ToLower()
 
+        if ($commandName -eq 'help') {
+            Write-Warning "Command 'help' is reserved (builtin). Module '$($file.Name)' ignored."
+            continue
+        }
+
         if ($script:CommandRegistry.ContainsKey($commandName)) { continue }
 
         $script:Commands[$commandName] = $file.FullName
@@ -326,6 +331,13 @@ function Register-ExternalDirectoryModule {
         [string]$ModuleName,
         [string]$Source
     )
+
+    $commandName = $ModuleName.ToLower()
+
+    if ($commandName -eq 'help') {
+        Write-Warning "Command 'help' is reserved (builtin). Module directory '$ModuleName' ignored."
+        return
+    }
 
     $ps1Files = Get-ChildItem -Path $ModulePath -File -Filter '*.ps1' -ErrorAction SilentlyContinue
     $subcommands = @{}
@@ -398,6 +410,12 @@ function Register-MetadataModule {
 
     foreach ($entry in $metadata.Commands.GetEnumerator()) {
         $cmdName = $entry.Key.ToLower()
+        
+        if ($cmdName -eq 'help') {
+            Write-Warning "Command 'help' is reserved (builtin). Metadata command '$cmdName' in module '$moduleName' ignored."
+            continue
+        }
+        
         if ($script:CommandRegistry.ContainsKey($cmdName)) { continue }
 
         $config = $entry.Value
@@ -877,7 +895,9 @@ function Show-Help {
             $lines += ("  {0,-12} {1} {2}" -f $name, $sourceLabel, $displaySynopsis)
         }
 
-        $lines | ForEach-Object { Write-Output $_ }
+        foreach ($line in $lines) {
+            Write-Output $line
+        }
         return
     }
 
@@ -956,8 +976,8 @@ function Show-Help {
 
             if ($helpHandler) {
                 $helpOutput = & $helpHandler @()
-                if ($helpOutput) { $helpOutput | ForEach-Object { Write-Verbose $_ } }
-                return $helpOutput
+                if ($helpOutput) { $helpOutput | ForEach-Object { Write-Output $_ } }
+                return
             }
 
             if ($handler) {
@@ -1059,387 +1079,6 @@ function Initialize-Boxing {
 # EMBEDDED core/*.ps1 (shared libraries)
 # ============================================================================
 
-# BEGIN core/commands.ps1
-# ============================================================================
-# Command Functions (Invoke-*)
-# ============================================================================
-
-function Invoke-Install {
-    # Generate project files from templates if they don't exist
-    if ($NeedsWizard) {
-        if (-not (Invoke-ConfigWizard)) {
-            return
-        }
-    }
-
-    Write-Host ""
-    Write-Host "========================================" -ForegroundColor Magenta
-    Write-Host "  $($Config.Project.Name) Setup" -ForegroundColor Magenta
-    Write-Host "========================================" -ForegroundColor Magenta
-
-    # Run install script if exists
-    $installScript = Join-Path $BoxDir "install.ps1"
-    if (Test-Path $installScript) {
-        & $installScript
-    } else {
-        # Inline install
-        Create-Directories
-        Ensure-SevenZip
-
-        # T035: Try/catch wrapper for continue-on-error (FR-016)
-        foreach ($pkg in $AllPackages) {
-            try {
-                Process-Package $pkg
-            } catch {
-                Write-Err "Failed to process $($pkg.Name): $_"
-                Write-Info "Continuing with remaining packages..."
-            }
-        }
-
-        Cleanup-Temp
-        Setup-Makefile
-        Generate-AllEnvFiles
-
-        Show-InstallComplete
-    }
-}
-
-function Invoke-Uninstall {
-    Write-Host ""
-    Write-Host "========================================" -ForegroundColor Yellow
-    Write-Host "  Uninstall Environment" -ForegroundColor Yellow
-    Write-Host "========================================" -ForegroundColor Yellow
-
-    $uninstallScript = Join-Path $BoxDir "uninstall.ps1"
-    if (Test-Path $uninstallScript) {
-        & $uninstallScript
-    } else {
-        Do-Uninstall
-    }
-}
-
-function Invoke-Env {
-    param([string]$Sub, [string[]]$Params)
-
-    switch ($Sub) {
-        "list" {
-            Show-EnvList
-        }
-        "update" {
-            Generate-AllEnvFiles
-            Write-Host "[OK] .env updated" -ForegroundColor Green
-        }
-        default {
-            Write-Host "Unknown env subcommand: $Sub" -ForegroundColor Red
-            Write-Host "Use: list, update" -ForegroundColor Gray
-            exit 1
-        }
-    }
-}
-
-function Invoke-Pkg {
-    param([string]$Sub)
-
-    switch ($Sub) {
-        "list" {
-            Show-PackageList
-        }
-        "update" {
-            Write-Host ""
-            Write-Host "========================================" -ForegroundColor Cyan
-            Write-Host "  Update Packages" -ForegroundColor Cyan
-            Write-Host "========================================" -ForegroundColor Cyan
-
-            Ensure-SevenZip
-
-            # T035: Try/catch wrapper for continue-on-error
-            foreach ($pkg in $AllPackages) {
-                try {
-                    Process-Package $pkg
-                } catch {
-                    Write-Err "Failed to process $($pkg.Name): $_"
-                    Write-Info "Continuing with remaining packages..."
-                }
-            }
-
-            # Only update env files, not Makefile
-            Generate-AllEnvFiles
-
-            Write-Host ""
-            Write-Host "[OK] Packages updated" -ForegroundColor Green
-        }
-        default {
-            Write-Host " Unknown pkg subcommand: $Sub" -ForegroundColor Red
-            Write-Host "Use: list, update" -ForegroundColor Gray
-            exit 1
-        }
-    }
-}
-
-# ============================================================================
-# Template Commands
-# ============================================================================
-
-function Invoke-EnvUpdate {
-    <#
-    .SYNOPSIS
-        Regenerate all template files from current environment
-
-    .DESCRIPTION
-        Regenerates Makefile, README.md and other template-based files
-        using current values from .env and box.config.psd1.
-
-    .EXAMPLE
-        box env update
-    #>
-
-    Write-Host ""
-    Write-Host "========================================" -ForegroundColor Cyan
-    Write-Host "  Updating Templates" -ForegroundColor Cyan
-    Write-Host "========================================" -ForegroundColor Cyan
-
-    # Verbose info
-    if ($VerbosePreference -eq 'Continue') {
-        Write-Verbose "Template directory: .box/tpl/"
-        Write-Verbose "Variable sources: .env, box.config.psd1"
-    }
-
-    # Load template variables
-    $variables = Merge-TemplateVariables
-
-    if ($VerbosePreference -eq 'Continue' -and $variables.Count -gt 0) {
-        Write-Verbose "Loaded $($variables.Count) variables:"
-        foreach ($key in ($variables.Keys | Sort-Object)) {
-            Write-Verbose "  $key = $($variables[$key])"
-        }
-    }
-
-    if ($variables.Count -eq 0) {
-        Write-Host "  [WARN] No variables found in .env or box.config.psd1" -ForegroundColor Yellow
-    }
-
-    # Get available templates
-    $templates = Get-AvailableTemplates -TemplateDir '.box/tpl'
-
-    if ($templates.Count -eq 0) {
-        Write-Host "  [INFO] No templates found in .box/tpl/" -ForegroundColor Cyan
-        return
-    }
-
-    $successCount = 0
-    $failCount = 0
-
-    foreach ($template in $templates) {
-        $outputPath = $template
-
-        # Find the actual template file - search for *.template and *.template.*
-        # Pattern: For "README.md", search for "README.template.md" or "README.template"
-        # Pattern: For "Makefile", search for "Makefile.template" or "Makefile.template.*"
-
-        $actualTemplate = $null
-
-        # Try: output_name.template (e.g., Makefile.template)
-        if (Test-Path ".box/tpl/$template.template" -PathType Leaf) {
-            $actualTemplate = Get-Item ".box/tpl/$template.template"
-        }
-        else {
-            # Try: output_name_without_ext.template.ext (e.g., README.template.md)
-            $templateWithExt = ".box/tpl/$($template -split '\.' | Select-Object -First 1).template.$($template -split '\.' | Select-Object -Last 1)"
-            if (Test-Path $templateWithExt -PathType Leaf) {
-                $actualTemplate = Get-Item $templateWithExt
-            }
-        }
-
-        if (-not $actualTemplate) {
-            Write-Host "  [!] Template file not found for: $template" -ForegroundColor Yellow
-            $failCount++
-            continue
-        }
-        $templatePath = $actualTemplate.FullName
-
-        Write-Host "  [*] Processing: $template..." -ForegroundColor White
-
-        if ($VerbosePreference -eq 'Continue') {
-            Write-Verbose "Template file: $templatePath"
-            Write-Verbose "Output file: $outputPath"
-        }
-
-        try {
-            # Validate file size
-            if (-not (Test-TemplateFileSize -FilePath $templatePath)) {
-                $failCount++
-                continue
-            }
-
-            # Validate encoding
-            if (-not (Test-FileEncoding -FilePath $templatePath)) {
-                Write-Host "    [WARN] Template may not be UTF-8 encoded: $template" -ForegroundColor Yellow
-            }
-
-            # Read template
-            $content = Get-Content $templatePath -Raw -Encoding UTF8
-
-            # Process tokens
-            $processed = Process-Template -TemplateContent $content -Variables $variables -TemplateName $template
-
-            # Add generation header based on file type
-            $fileType = if ($template -like '*.md') { 'markdown' } elseif ($template -eq 'Makefile*') { 'makefile' } else { 'generic' }
-            $header = New-GenerationHeader -FileType $fileType
-            $output = $header + "`n`n" + $processed
-
-            # Backup existing file if exists
-            if (Test-Path $outputPath) {
-                $backupPath = Backup-File -FilePath $outputPath
-                if ($backupPath) {
-                    Write-Host "    [BKP] Backed up: $(Split-Path $backupPath -Leaf)" -ForegroundColor Gray
-                    if ($VerbosePreference -eq 'Continue') {
-                        Write-Verbose "Backup created: $backupPath"
-                    }
-                }
-            }
-
-            # Write generated file
-            Set-Content -Path $outputPath -Value $output -Encoding UTF8 -Force
-            Write-Host "    [OK] Generated: $outputPath" -ForegroundColor Green
-            if ($VerbosePreference -eq 'Continue') {
-                Write-Verbose "Written $($output.Length) characters to $outputPath"
-            }
-            $successCount++
-        }
-        catch {
-            Write-Host "    [ERR] Error: $_" -ForegroundColor Red
-            $failCount++
-        }
-    }
-
-    Write-Host ""
-    Write-Host "Summary: $successCount generated" -ForegroundColor Green
-    if ($failCount -gt 0) {
-        Write-Host "         $failCount failed" -ForegroundColor Red
-    }
-}
-
-function Invoke-TemplateApply {
-    <#
-    .SYNOPSIS
-        Regenerate a single template file
-
-    .DESCRIPTION
-        Regenerates one specific template-based file using current
-        environment values.
-
-    .PARAMETER Template
-        Template name to apply (e.g., 'Makefile', 'README.md')
-
-    .EXAMPLE
-        box template apply Makefile
-    #>
-    param(
-        [Parameter(Mandatory=$true, Position=0)]
-        [string]$Template
-    )
-
-    Write-Host ""
-    Write-Host "========================================" -ForegroundColor Cyan
-    Write-Host "  Applying Template: $Template" -ForegroundColor Cyan
-    Write-Host "========================================" -ForegroundColor Cyan
-
-    if ($VerbosePreference -eq 'Continue') {
-        Write-Verbose "Template name: $Template"
-    }
-
-    # Normalize template name (add .template if missing)
-    if (-not $Template.EndsWith('.template')) {
-        $templatePath = ".box/tpl/$Template.template"
-        $outputPath = $Template
-    }
-    else {
-        $templatePath = ".box/tpl/$Template"
-        $outputPath = $Template -replace '\.template$', ''
-    }
-
-    # Check if template exists
-    if (-not (Test-Path $templatePath)) {
-        $available = Get-AvailableTemplates -TemplateDir '.box/tpl'
-        Write-Host "  [ERR] Template not found: $Template" -ForegroundColor Red
-        Write-Host ""
-        Write-Host "Available templates:" -ForegroundColor Yellow
-        foreach ($t in $available) {
-            Write-Host "  - $t" -ForegroundColor White
-        }
-        exit 1
-    }
-
-    try {
-        # Load template variables
-        $variables = Merge-TemplateVariables
-
-        if ($VerbosePreference -eq 'Continue') {
-            Write-Verbose "Loaded $($variables.Count) variables from .env and config"
-            Write-Verbose "Template path: $templatePath"
-            Write-Verbose "Output path: $outputPath"
-        }
-
-        # Validate file size
-        if (-not (Test-TemplateFileSize -FilePath $templatePath)) {
-            exit 1
-        }
-
-        # Validate encoding
-        if (-not (Test-FileEncoding -FilePath $templatePath)) {
-            Write-Host "  [WARN] Template may not be UTF-8 encoded" -ForegroundColor Yellow
-        }
-
-        # Read template
-        $content = Get-Content $templatePath -Raw -Encoding UTF8
-
-        # Process tokens
-        Write-Host "  [*] Processing template..." -ForegroundColor White
-        $processed = Process-Template -TemplateContent $content -Variables $variables -TemplateName $Template
-
-        # Add generation header
-        $fileType = if ($outputPath -like '*.md') { 'markdown' } elseif ($outputPath -like 'Makefile*') { 'makefile' } else { 'generic' }
-        $header = New-GenerationHeader -FileType $fileType
-        $output = $header + "`n`n" + $processed
-
-        # Backup existing file if exists
-        if (Test-Path $outputPath) {
-            $backupPath = Backup-File -FilePath $outputPath
-            if ($backupPath) {
-                Write-Host "  [BKP] Backed up: $(Split-Path $backupPath -Leaf)" -ForegroundColor Gray
-            }
-        }
-
-        # Write generated file
-        Set-Content -Path $outputPath -Value $output -Encoding UTF8 -Force
-        Write-Host "  [OK] Generated: $outputPath" -ForegroundColor Green
-    }
-    catch {
-        Write-Host "  [ERR] Error: $_" -ForegroundColor Red
-        exit 1
-    }
-
-    Write-Host ""
-}
-
-function Invoke-Init {
-    <#
-    .SYNOPSIS
-        Generate missing project files from templates
-
-    .DESCRIPTION
-        Calls Invoke-BoxInit from templates.ps1 module to generate
-        README.md, box.config.psd1, and other files from .box/tpl/ templates.
-        Only creates missing files - safe to re-run.
-
-    .EXAMPLE
-        box init
-    #>
-
-    Invoke-BoxInit
-}
-
-# END core/commands.ps1
 # BEGIN core/common.ps1
 # ============================================================================
 # Common Functions - State Management
@@ -2514,33 +2153,6 @@ function Ask-ManualEnvs {
 }
 
 # END core/extract.ps1
-# BEGIN core/help.ps1
-# ============================================================================
-# Help Functions
-# ============================================================================
-
-function Show-Help {
-    Write-Host ""
-    Write-Host "Usage: box [command] [subcommand]" -ForegroundColor Cyan
-    Write-Host ""
-    Write-Host "Commands:" -ForegroundColor Yellow
-    Write-Host "  install          Install all dependencies (default)" -ForegroundColor White
-    Write-Host "  uninstall        Remove all generated files (back to factory state)" -ForegroundColor White
-    Write-Host "  env              Manage environment variables" -ForegroundColor White
-    Write-Host "  pkg              Manage packages" -ForegroundColor White
-    Write-Host "  help             Show this help" -ForegroundColor White
-    Write-Host ""
-    Write-Host "Env subcommands:" -ForegroundColor Yellow
-    Write-Host "  env list         List all environment variables" -ForegroundColor White
-    Write-Host "  env update       Regenerate .env file" -ForegroundColor White
-    Write-Host ""
-    Write-Host "Pkg subcommands:" -ForegroundColor Yellow
-    Write-Host "  pkg list         List all packages with status" -ForegroundColor White
-    Write-Host "  pkg update       Update/install packages interactively" -ForegroundColor White
-    Write-Host ""
-}
-
-# END core/help.ps1
 # BEGIN core/makefile.ps1
 # ============================================================================
 # Makefile Generation Functions
@@ -2622,7 +2234,7 @@ function Ensure-SevenZip {
 
 .NOTES
     Module: templates.ps1
-    Version: 0.1.88
+    Version: 0.1.89
 #>
 
 # ============================================================================
@@ -3663,38 +3275,6 @@ function Ask-Path {
 # ============================================================================
 # Display Functions
 # ============================================================================
-
-function Show-Help {
-    Write-Host ""
-    Write-Host "Boxing - Reproducible Environment Manager" -ForegroundColor Cyan
-    Write-Host ""
-    Write-Host "Commands:" -ForegroundColor Yellow
-
-    $cmdName = if ($script:Mode -eq 'boxer') { 'boxer' } else { 'box' }
-
-    # Generate help from registered commands dynamically
-    if ($script:Commands.Count -gt 0) {
-        $sortedCommands = $script:Commands.Keys | Sort-Object
-        foreach ($cmd in $sortedCommands) {
-            $description = switch ($cmd) {
-                'init'      { 'Create a new Box project' }
-                'list'      { 'List available Box types' }
-                'install'   { if ($script:Mode -eq 'boxer') { 'Install a Box from GitHub' } else { 'Install workspace packages' } }
-                'status'    { 'Show installation status' }
-                'env'       { 'Manage environment variables' }
-                'clean'     { 'Clean installation' }
-                'uninstall' { 'Remove all packages' }
-                'load'      { 'Load environment into current shell' }
-                'info'      { 'Show workspace information' }
-                'version'   { 'Show version' }
-                default     { $cmd }
-            }
-            $padding = ' ' * (16 - $cmd.Length)
-            Write-Host "  $cmdName $cmd$padding$description" -ForegroundColor White
-        }
-    }
-    Write-Host ""
-}
 
 function Show-List {
     Write-Host ""
@@ -4802,12 +4382,15 @@ function Test-PackageInstalled {
 
 # END modules/shared/pkg/detection.ps1
 # BEGIN modules/shared/pkg/extraction.ps1
-$extractCore = Join-Path $PSScriptRoot '..\..\..\core\extract.ps1'
-if (Test-Path $extractCore) {
-    . $extractCore
-}
-else {
-    throw "Missing core extract library at $extractCore"
+# Load core extract library if not embedded (embedded builds already have it)
+if (-not $script:IsEmbedded) {
+    $extractCore = Join-Path $PSScriptRoot '..\..\..\core\extract.ps1'
+    if (Test-Path $extractCore) {
+        . $extractCore
+    }
+    else {
+        throw "Missing core extract library at $extractCore"
+    }
 }
 
 # END modules/shared/pkg/extraction.ps1

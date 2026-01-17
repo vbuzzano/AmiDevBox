@@ -6,8 +6,8 @@
     Standalone boxer.ps1 with embedded modules
 
 .NOTES
-    Build Date: 2026-01-17 18:12:06
-    Version: 0.1.120
+    Build Date: 2026-01-17 20:17:59
+    Version: 0.1.127
 #>
 
 param(
@@ -25,7 +25,7 @@ $ErrorActionPreference = 'Stop'
 $script:IsEmbedded = $true
 
 # Embedded version information (injected by build script)
-$script:BoxerVersion = "0.1.120"
+$script:BoxerVersion = "0.1.127"
 $script:Mode = 'boxer'
 
 # BEGIN boxing.ps1
@@ -262,6 +262,11 @@ function Register-ExternalModules {
     foreach ($file in $fileModules) {
         $commandName = [System.IO.Path]::GetFileNameWithoutExtension($file.Name).ToLower()
 
+        if ($commandName -eq 'help') {
+            Write-Warning "Command 'help' is reserved (builtin). Module '$($file.Name)' ignored."
+            continue
+        }
+
         if ($script:CommandRegistry.ContainsKey($commandName)) { continue }
 
         $script:Commands[$commandName] = $file.FullName
@@ -296,6 +301,13 @@ function Register-ExternalDirectoryModule {
         [string]$ModuleName,
         [string]$Source
     )
+
+    $commandName = $ModuleName.ToLower()
+
+    if ($commandName -eq 'help') {
+        Write-Warning "Command 'help' is reserved (builtin). Module directory '$ModuleName' ignored."
+        return
+    }
 
     $ps1Files = Get-ChildItem -Path $ModulePath -File -Filter '*.ps1' -ErrorAction SilentlyContinue
     $subcommands = @{}
@@ -368,6 +380,12 @@ function Register-MetadataModule {
 
     foreach ($entry in $metadata.Commands.GetEnumerator()) {
         $cmdName = $entry.Key.ToLower()
+        
+        if ($cmdName -eq 'help') {
+            Write-Warning "Command 'help' is reserved (builtin). Metadata command '$cmdName' in module '$moduleName' ignored."
+            continue
+        }
+        
         if ($script:CommandRegistry.ContainsKey($cmdName)) { continue }
 
         $config = $entry.Value
@@ -847,7 +865,9 @@ function Show-Help {
             $lines += ("  {0,-12} {1} {2}" -f $name, $sourceLabel, $displaySynopsis)
         }
 
-        $lines | ForEach-Object { Write-Output $_ }
+        foreach ($line in $lines) {
+            Write-Output $line
+        }
         return
     }
 
@@ -926,8 +946,8 @@ function Show-Help {
 
             if ($helpHandler) {
                 $helpOutput = & $helpHandler @()
-                if ($helpOutput) { $helpOutput | ForEach-Object { Write-Verbose $_ } }
-                return $helpOutput
+                if ($helpOutput) { $helpOutput | ForEach-Object { Write-Output $_ } }
+                return
             }
 
             if ($handler) {
@@ -1198,38 +1218,6 @@ function Ask-Path {
 # ============================================================================
 # Display Functions
 # ============================================================================
-
-function Show-Help {
-    Write-Host ""
-    Write-Host "Boxing - Reproducible Environment Manager" -ForegroundColor Cyan
-    Write-Host ""
-    Write-Host "Commands:" -ForegroundColor Yellow
-
-    $cmdName = if ($script:Mode -eq 'boxer') { 'boxer' } else { 'box' }
-
-    # Generate help from registered commands dynamically
-    if ($script:Commands.Count -gt 0) {
-        $sortedCommands = $script:Commands.Keys | Sort-Object
-        foreach ($cmd in $sortedCommands) {
-            $description = switch ($cmd) {
-                'init'      { 'Create a new Box project' }
-                'list'      { 'List available Box types' }
-                'install'   { if ($script:Mode -eq 'boxer') { 'Install a Box from GitHub' } else { 'Install workspace packages' } }
-                'status'    { 'Show installation status' }
-                'env'       { 'Manage environment variables' }
-                'clean'     { 'Clean installation' }
-                'uninstall' { 'Remove all packages' }
-                'load'      { 'Load environment into current shell' }
-                'info'      { 'Show workspace information' }
-                'version'   { 'Show version' }
-                default     { $cmd }
-            }
-            $padding = ' ' * (16 - $cmd.Length)
-            Write-Host "  $cmdName $cmd$padding$description" -ForegroundColor White
-        }
-    }
-    Write-Host ""
-}
 
 function Show-List {
     Write-Host ""
@@ -2658,5 +2646,5 @@ function Invoke-Boxer-Version {
 
 # Ensure Arguments is an array (can be null in irm|iex context)
 if (-not $Arguments) { $Arguments = @() }
-Initialize-Boxing -Arguments $Arguments
+Initialize-Boxing -Arguments $Arguments | Out-Null
 
