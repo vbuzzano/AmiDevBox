@@ -6,8 +6,8 @@
     Standalone boxer.ps1 with embedded modules
 
 .NOTES
-    Build Date: 2026-01-17 23:23:55
-    Version: 0.1.142
+    Build Date: 2026-01-17 23:27:02
+    Version: 0.1.143
 #>
 
 param(
@@ -25,7 +25,7 @@ $ErrorActionPreference = 'Stop'
 $script:IsEmbedded = $true
 
 # Embedded version information (injected by build script)
-$script:BoxerVersion = "0.1.142"
+$script:BoxerVersion = "0.1.143"
 $script:BoxName = ""
 $script:Mode = 'boxer'
 
@@ -1026,6 +1026,8 @@ function Update-LocalBoxIfNeeded {
         }
 
         Write-Host "✓ Local .box updated to v$newVersion" -ForegroundColor Green
+        Write-Host ""
+        Write-Host "⚠ Restart your PowerShell session to use the new version" -ForegroundColor Yellow
 
     } catch {
         Write-Verbose "Failed to update local .box: $_"

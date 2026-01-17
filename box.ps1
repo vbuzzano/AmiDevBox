@@ -7,7 +7,7 @@
 
 .NOTES
     Build Date: 2026-01-17
-    Version: 0.1.96
+    Version: 0.1.97
 #>
 
 param(
@@ -25,7 +25,7 @@ $ErrorActionPreference = 'Stop'
 # ============================================================================
 
 # Embedded version information (injected by build script)
-$script:BoxerVersion = "0.1.96"
+$script:BoxerVersion = "0.1.97"
 $script:BoxName = ""
 $script:IsEmbedded = $true
 $script:Mode = 'box'
@@ -1056,6 +1056,8 @@ function Update-LocalBoxIfNeeded {
         }
 
         Write-Host "✓ Local .box updated to v$newVersion" -ForegroundColor Green
+        Write-Host ""
+        Write-Host "⚠ Restart your PowerShell session to use the new version" -ForegroundColor Yellow
 
     } catch {
         Write-Verbose "Failed to update local .box: $_"
@@ -2315,7 +2317,7 @@ function Ensure-SevenZip {
 
 .NOTES
     Module: templates.ps1
-    Version: 0.1.96
+    Version: 0.1.97
 #>
 
 # ============================================================================
@@ -4404,6 +4406,9 @@ function Invoke-Box-Update {
 
         # Execute irm|iex (will trigger Update-LocalBoxIfNeeded in Initialize-Boxing)
         Invoke-RestMethod -Uri $url | Invoke-Expression
+
+        Write-Host ""
+        Write-Host "⚠ Restart your PowerShell session to use the updated box" -ForegroundColor Yellow
 
     } catch {
         Write-Host ""
