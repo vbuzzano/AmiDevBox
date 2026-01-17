@@ -7,7 +7,7 @@
 
 .NOTES
     Build Date: 2026-01-17
-    Version: 0.1.93
+    Version: 0.1.94
 #>
 
 param(
@@ -25,7 +25,7 @@ $ErrorActionPreference = 'Stop'
 # ============================================================================
 
 # Embedded version information (injected by build script)
-$script:BoxerVersion = "0.1.93"
+$script:BoxerVersion = "0.1.94"
 $script:IsEmbedded = $true
 $script:Mode = 'box'
 
@@ -891,17 +891,10 @@ function Show-Help {
         $entries = $script:CommandRegistry.GetEnumerator() | Sort-Object Key
         foreach ($entry in $entries) {
             $value = $entry.Value
-            $source = Get-DescriptorField -Descriptor $value -Key 'Source'
-            $sourceLabel = switch ($source) {
-                'built-in' { '[built-in]' }
-                'custom' { '[custom]' }
-                default { '[project]' }
-            }
-
             $synopsis = Get-DescriptorField -Descriptor $value -Key 'Synopsis'
             $name = Get-DescriptorField -Descriptor $value -Key 'Name'
             $displaySynopsis = if ($synopsis) { $synopsis } else { '' }
-            $lines += ("  {0,-12} {1} {2}" -f $name, $sourceLabel, $displaySynopsis)
+            $lines += ("  {0,-12} {1}" -f $name, $displaySynopsis)
         }
 
         foreach ($line in $lines) {
@@ -2246,7 +2239,7 @@ function Ensure-SevenZip {
 
 .NOTES
     Module: templates.ps1
-    Version: 0.1.93
+    Version: 0.1.94
 #>
 
 # ============================================================================
