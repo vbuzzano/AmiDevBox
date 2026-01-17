@@ -7,7 +7,7 @@
 
 .NOTES
     Build Date: 2026-01-17
-    Version: 0.1.94
+    Version: 0.1.95
 #>
 
 param(
@@ -25,7 +25,7 @@ $ErrorActionPreference = 'Stop'
 # ============================================================================
 
 # Embedded version information (injected by build script)
-$script:BoxerVersion = "0.1.94"
+$script:BoxerVersion = "0.1.95"
 $script:IsEmbedded = $true
 $script:Mode = 'box'
 
@@ -573,10 +573,10 @@ function Register-EmbeddedCommands {
         if (-not $script:CommandRegistry.ContainsKey($commandName)) {
             # Extract synopsis from function's help comment
             $helpInfo = Get-Help $funcName -ErrorAction SilentlyContinue
-            $synopsis = if ($helpInfo -and $helpInfo.Synopsis -and $helpInfo.Synopsis -ne $funcName) { 
-                $helpInfo.Synopsis 
-            } else { 
-                $null 
+            $synopsis = if ($helpInfo -and $helpInfo.Synopsis -and $helpInfo.Synopsis -ne $funcName) {
+                $helpInfo.Synopsis
+            } else {
+                $null
             }
 
             $script:CommandRegistry[$commandName] = @{
@@ -2239,7 +2239,7 @@ function Ensure-SevenZip {
 
 .NOTES
     Module: templates.ps1
-    Version: 0.1.94
+    Version: 0.1.95
 #>
 
 # ============================================================================

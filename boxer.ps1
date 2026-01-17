@@ -6,8 +6,8 @@
     Standalone boxer.ps1 with embedded modules
 
 .NOTES
-    Build Date: 2026-01-17 21:02:14
-    Version: 0.1.136
+    Build Date: 2026-01-17 21:54:45
+    Version: 0.1.139
 #>
 
 param(
@@ -25,7 +25,7 @@ $ErrorActionPreference = 'Stop'
 $script:IsEmbedded = $true
 
 # Embedded version information (injected by build script)
-$script:BoxerVersion = "0.1.136"
+$script:BoxerVersion = "0.1.139"
 $script:Mode = 'boxer'
 
 # BEGIN boxing.ps1
@@ -543,10 +543,10 @@ function Register-EmbeddedCommands {
         if (-not $script:CommandRegistry.ContainsKey($commandName)) {
             # Extract synopsis from function's help comment
             $helpInfo = Get-Help $funcName -ErrorAction SilentlyContinue
-            $synopsis = if ($helpInfo -and $helpInfo.Synopsis -and $helpInfo.Synopsis -ne $funcName) { 
-                $helpInfo.Synopsis 
-            } else { 
-                $null 
+            $synopsis = if ($helpInfo -and $helpInfo.Synopsis -and $helpInfo.Synopsis -ne $funcName) {
+                $helpInfo.Synopsis
+            } else {
+                $null
             }
 
             $script:CommandRegistry[$commandName] = @{
@@ -1329,26 +1329,29 @@ function Get-BoxerVersion {
 function Get-InstalledVersion {
     <#
     .SYNOPSIS
-    Gets the version from a metadata.psd1 file.
+    Gets the version from an installed boxer.ps1 file.
 
-    .PARAMETER MetadataPath
-    Path to metadata.psd1 file
+    .PARAMETER BoxerPath
+    Path to boxer.ps1 file
 
     .OUTPUTS
     Version string (e.g., "1.0.0") or $null if not found
     #>
     param(
         [Parameter(Mandatory=$true)]
-        [string]$MetadataPath
+        [string]$BoxerPath
     )
 
-    if (-not (Test-Path $MetadataPath)) {
+    if (-not (Test-Path $BoxerPath)) {
         return $null
     }
 
     try {
-        $metadata = Import-PowerShellDataFile -Path $MetadataPath -ErrorAction Stop
-        return $metadata.Version
+        $content = Get-Content $BoxerPath -Raw
+        if ($content -match '\$script:BoxerVersion\s*=\s*"([^"]+)"') {
+            return $Matches[1]
+        }
+        return $null
     } catch {
         return $null
     }
@@ -1855,8 +1858,8 @@ function Install-BoxingSystem {
         # Always set source repo for AmiDevBox release (hardcoded in dist build)
         $SourceRepo = "AmiDevBox"
 
-        # Get versions for comparison
-        $InstalledVersion = Get-InstalledVersion -MetadataPath $BoxerMetadataPath
+        # Get versions for comparison (read from actual file, not metadata)
+        $InstalledVersion = Get-InstalledVersion -BoxerPath $BoxerPath
 
         # Get new version via core API (works in all modes)
         $NewVersion = Get-BoxerVersion
@@ -2076,12 +2079,13 @@ function Install-CurrentBox {
         $BoxesDir = Join-Path $BoxingDir "Boxes"
         $BoxDir = Join-Path $BoxesDir $BoxName
         $BoxMetadataPath = Join-Path $BoxDir "metadata.psd1"
+        $BoxScriptPath = Join-Path $BoxDir "box.ps1"
 
         # Base URL for downloads
         $BaseUrl = "https://raw.githubusercontent.com/vbuzzano/$BoxName/main"
 
-        # Get installed version and boxer version
-        $InstalledVersion = Get-InstalledVersion -MetadataPath $BoxMetadataPath
+        # Get installed version from box.ps1 file (source of truth)
+        $InstalledVersion = Get-InstalledVersion -BoxerPath $BoxScriptPath
         $InstalledBoxerVersion = $null
         if (Test-Path $BoxMetadataPath) {
             $metadata = Import-PowerShellDataFile $BoxMetadataPath
