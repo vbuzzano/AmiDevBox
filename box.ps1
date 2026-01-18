@@ -7,7 +7,7 @@
 
 .NOTES
     Build Date: 2026-01-18
-    Version: 0.1.100
+    Version: 0.1.101
 #>
 
 param(
@@ -25,7 +25,7 @@ $ErrorActionPreference = 'Stop'
 # ============================================================================
 
 # Embedded version information (injected by build script)
-$script:BoxerVersion = "0.1.100"
+$script:BoxerVersion = "0.1.101"
 $script:BoxName = ""
 $script:IsEmbedded = $true
 $script:Mode = 'box'
@@ -2698,7 +2698,7 @@ function Ensure-SevenZip {
 
 .NOTES
     Module: templates.ps1
-    Version: 0.1.100
+    Version: 0.1.101
 #>
 
 # ============================================================================
