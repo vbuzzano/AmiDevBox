@@ -6,8 +6,8 @@
     Standalone box.ps1 with embedded modules
 
 .NOTES
-    Build Date: 2026-01-17
-    Version: 0.1.98
+    Build Date: 2026-01-18
+    Version: 0.1.99
 #>
 
 param(
@@ -25,7 +25,7 @@ $ErrorActionPreference = 'Stop'
 # ============================================================================
 
 # Embedded version information (injected by build script)
-$script:BoxerVersion = "0.1.98"
+$script:BoxerVersion = "0.1.99"
 $script:BoxName = ""
 $script:IsEmbedded = $true
 $script:Mode = 'box'
@@ -1017,7 +1017,7 @@ function Update-LocalBoxIfNeeded {
 
         # Get current script's box name (embedded variable set at build time)
         $scriptBoxName = if ($script:BoxName) { $script:BoxName } else { "AmiDevBox" }
-        
+
         if ($localBoxName -ne $scriptBoxName) {
             Write-Verbose "Local box is $localBoxName, script is $scriptBoxName - skipping update"
             return
@@ -1167,12 +1167,43 @@ function Initialize-Boxing {
 
 # BEGIN core/common.ps1
 # ============================================================================
-# Common Functions - State Management
+# Common Functions - Utility & State Management
 # ============================================================================
 #
 # Consolidated common utilities, after extracting UI functions to ui.ps1
 # and config functions to config.ps1. This file now contains:
+# - Utility functions (descriptor field lookup)
 # - State management (Load/Save/Get/Set/Remove package state)
+
+# ============================================================================
+# Utility Functions
+# ============================================================================
+
+function Get-DescriptorField {
+    <#
+    .SYNOPSIS
+    Safely retrieves a field from a descriptor hashtable
+
+    .PARAMETER Descriptor
+    The descriptor hashtable
+
+    .PARAMETER Key
+    The key to retrieve
+
+    .EXAMPLE
+    $handler = Get-DescriptorField -Descriptor $entry -Key 'Handler'
+    #>
+    param(
+        [hashtable]$Descriptor,
+        [string]$Key
+    )
+
+    if ($Descriptor -and $Descriptor.ContainsKey($Key)) {
+        return $Descriptor[$Key]
+    }
+
+    return $null
+}
 
 # ============================================================================
 # State Management
@@ -2320,7 +2351,7 @@ function Ensure-SevenZip {
 
 .NOTES
     Module: templates.ps1
-    Version: 0.1.98
+    Version: 0.1.99
 #>
 
 # ============================================================================

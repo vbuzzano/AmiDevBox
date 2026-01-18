@@ -6,8 +6,8 @@
     Standalone boxer.ps1 with embedded modules
 
 .NOTES
-    Build Date: 2026-01-17 23:28:40
-    Version: 0.1.145
+    Build Date: 2026-01-18 01:11:56
+    Version: 0.1.146
 #>
 
 param(
@@ -25,7 +25,7 @@ $ErrorActionPreference = 'Stop'
 $script:IsEmbedded = $true
 
 # Embedded version information (injected by build script)
-$script:BoxerVersion = "0.1.145"
+$script:BoxerVersion = "0.1.146"
 $script:BoxName = ""
 $script:Mode = 'boxer'
 
@@ -987,7 +987,7 @@ function Update-LocalBoxIfNeeded {
 
         # Get current script's box name (embedded variable set at build time)
         $scriptBoxName = if ($script:BoxName) { $script:BoxName } else { "AmiDevBox" }
-        
+
         if ($localBoxName -ne $scriptBoxName) {
             Write-Verbose "Local box is $localBoxName, script is $scriptBoxName - skipping update"
             return
@@ -2024,8 +2024,6 @@ function box {
 
     & `$boxScript @args
 }
-
-Write-Host "✓ Boxing functions loaded (boxer, box)" -ForegroundColor Green
 "@
             $InitPath = Join-Path $BoxingDir "init.ps1"
             Set-Content -Path $InitPath -Value $InitScript -Encoding UTF8

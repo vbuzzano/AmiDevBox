@@ -2,12 +2,13 @@
     BoxName = "AmiDevBox"
     BoxType = "dev"
     SourceRepo = "vbuzzano/AmiDevBox"  # GitHub repo for updates
-    BuildDate = "2026-01-17"
-    Version = "0.1.98"
-    BoxerVersion = "0.1.145"  # Updated by dist.ps1 from boxer.ps1
+    BuildDate = "2026-01-18"
+    Version = "0.1.99"
+    BoxerVersion = "0.1.146"  # Updated by dist.ps1 from boxer.ps1
     Author = "Vincent Buzzano"
     Tags = @("amiga", "vbcc", "68k", "development")
 }
+
 
 
 
