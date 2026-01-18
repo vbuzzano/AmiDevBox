@@ -6,8 +6,8 @@
     Standalone boxer.ps1 with embedded modules
 
 .NOTES
-    Build Date: 2026-01-18 01:11:56
-    Version: 0.1.146
+    Build Date: 2026-01-18 03:00:31
+    Version: 0.1.147
 #>
 
 param(
@@ -25,7 +25,7 @@ $ErrorActionPreference = 'Stop'
 $script:IsEmbedded = $true
 
 # Embedded version information (injected by build script)
-$script:BoxerVersion = "0.1.146"
+$script:BoxerVersion = "0.1.147"
 $script:BoxName = ""
 $script:Mode = 'boxer'
 
@@ -454,6 +454,7 @@ function Register-MetadataModule {
             HelpHandler = $helpHandler
             Synopsis = if ($config.ContainsKey('Synopsis')) { $config['Synopsis'] } else { $null }
             Description = if ($config.ContainsKey('Description')) { $config['Description'] } else { $null }
+            Hidden = if ($config.ContainsKey('Hidden')) { [bool]$config['Hidden'] } else { $false }
         }
 
         Write-Verbose "Registered metadata command ($Source): $cmdName"
@@ -695,6 +696,7 @@ function Show-SubcommandHelp {
     $lines | ForEach-Object { Write-Output $_ }
 }
 
+
 # Invoke dispatcher descriptor with explicit parameters
 function Invoke-DispatcherDescriptor {
     param(
@@ -849,6 +851,18 @@ function Invoke-Command {
 function Show-Help {
     param([string[]]$CommandPath = @())
 
+    if (-not (Get-Command -Name 'New-HelpProfileFromRegistry' -ErrorAction SilentlyContinue)) {
+        $localHelp = Join-Path $script:BoxingRoot 'core/help.ps1'
+        $fallbackHelp = Join-Path $PSScriptRoot 'core/help.ps1'
+
+        if (Test-Path $localHelp) {
+            . $localHelp
+        }
+        elseif (Test-Path $fallbackHelp) {
+            . $fallbackHelp
+        }
+    }
+
     if (-not $CommandPath) {
         $CommandPath = @()
     }
@@ -857,20 +871,10 @@ function Show-Help {
     }
 
     if (-not $CommandPath -or $CommandPath.Count -eq 0) {
-        $lines = @('Available commands:')
-
-        $entries = $script:CommandRegistry.GetEnumerator() | Sort-Object Key
-        foreach ($entry in $entries) {
-            $value = $entry.Value
-            $synopsis = Get-DescriptorField -Descriptor $value -Key 'Synopsis'
-            $name = Get-DescriptorField -Descriptor $value -Key 'Name'
-            $displaySynopsis = if ($synopsis) { $synopsis } else { '' }
-            $lines += ("  {0,-12} {1}" -f $name, $displaySynopsis)
-        }
-
-        foreach ($line in $lines) {
-            Write-Output $line
-        }
+        $context = if ($script:Mode -and $script:Mode.ToLower() -eq 'boxer') { 'boxer' } else { 'box' }
+        $profile = New-HelpProfileFromRegistry -Context $context -Registry $script:CommandRegistry -Title $null -Description $null -Header $null
+        $lines = Render-HelpProfile -Profile $profile
+        foreach ($line in $lines) { Write-Output $line }
         return
     }
 
@@ -889,11 +893,15 @@ function Show-Help {
     switch ($kind) {
         'embedded' {
             $handler = Get-DescriptorField -Descriptor $entry -Key 'Handler'
-            Get-Help $handler -ErrorAction SilentlyContinue | Out-String | Write-Output
+            $profile = New-HelpProfile -Context 'boxer' -Title $null -Description $null -Header $null -Commands @(Convert-RegistryEntryToHelpCommand -Entry $entry -Context 'boxer')
+            $lines = Render-CommandHelp -Entry (Convert-RegistryEntryToHelpCommand -Entry $entry -Context 'boxer') -Profile $profile -SubPath $subPath
+            foreach ($line in $lines) { Write-Output $line }
         }
         'external-file' {
             $handler = Get-DescriptorField -Descriptor $entry -Key 'Handler'
-            Get-Help $handler -ErrorAction SilentlyContinue | Out-String | Write-Output
+            $profile = New-HelpProfile -Context 'box' -Title $null -Description $null -Header $null -Commands @(Convert-RegistryEntryToHelpCommand -Entry $entry -Context 'box')
+            $lines = Render-CommandHelp -Entry (Convert-RegistryEntryToHelpCommand -Entry $entry -Context 'box') -Profile $profile -SubPath $subPath
+            foreach ($line in $lines) { Write-Output $line }
         }
         'external-directory' {
             $subcommands = Get-DescriptorField -Descriptor $entry -Key 'Subcommands'
@@ -904,7 +912,8 @@ function Show-Help {
             if ($subPath.Count -gt 0) {
                 $subName = $subPath[0].ToLower()
                 if ($subcommands.ContainsKey($subName)) {
-                    Get-Help $subcommands[$subName] -ErrorAction SilentlyContinue | Out-String | Write-Output
+                    $subHandler = Get-DescriptorField -Descriptor $subcommands[$subName] -Key 'Handler'
+                    Show-DescriptorHelp -Descriptor $subHandler
                     return
                 }
             }
@@ -915,12 +924,9 @@ function Show-Help {
                 return
             }
 
-            if ($defaultHandler) {
-                Get-Help $defaultHandler -ErrorAction SilentlyContinue | Out-String | Write-Output
-            }
-            else {
-                Show-SubcommandHelp -Entry $entry
-            }
+            $profile = New-HelpProfile -Context 'box' -Title $null -Description $null -Header $null -Commands @(Convert-RegistryEntryToHelpCommand -Entry $entry -Context 'box')
+            $lines = Render-CommandHelp -Entry (Convert-RegistryEntryToHelpCommand -Entry $entry -Context 'box') -Profile $profile -SubPath $subPath
+            foreach ($line in $lines) { Write-Output $line }
         }
         'metadata' {
             $dispatcher = Get-DescriptorField -Descriptor $entry -Key 'Dispatcher'
@@ -957,7 +963,9 @@ function Show-Help {
                 Show-DescriptorHelp -Descriptor $handler
             }
             else {
-                Show-SubcommandHelp -Entry $entry
+                $profile = New-HelpProfile -Context 'box' -Title $null -Description $null -Header $null -Commands @(Convert-RegistryEntryToHelpCommand -Entry $entry -Context 'box')
+                $lines = Render-CommandHelp -Entry (Convert-RegistryEntryToHelpCommand -Entry $entry -Context 'box') -Profile $profile -SubPath $subPath
+                foreach ($line in $lines) { Write-Output $line }
             }
         }
         default {
