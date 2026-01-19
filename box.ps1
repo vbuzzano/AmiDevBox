@@ -1,13 +1,15 @@
+#Requires -Version 7.0
 <#
 .SYNOPSIS
     AmiDevBox - Complete Amiga development environment setup system
 
 .DESCRIPTION
-    Standalone box.ps1 with embedded modules
+    Standalone box.ps1 with embedded core libraries and modules
 
 .NOTES
-    Build Date: 2026-01-18
-    Version: 0.1.101
+    Build Date: 2026-01-19
+    Version: 0.1.103
+    Build Type: Embedded
 #>
 
 param(
@@ -18,18 +20,10 @@ param(
     [string[]]$Arguments
 )
 
+Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-# ============================================================================
-# Bootstrap - Find .box directory
-# ============================================================================
-
-# Embedded version information (injected by build script)
-$script:BoxerVersion = "0.1.101"
-$script:BoxName = ""
-$script:IsEmbedded = $true
-$script:Mode = 'box'
-
+# Find .box directory
 $BaseDir = Get-Location
 $BoxDir = $null
 
@@ -48,37 +42,41 @@ while ($true) {
     $BaseDir = $parent
 }
 
-# Set global paths
+# Global variables
+$script:BoxingRoot = $BaseDir
+$script:Mode = 'box'
+$script:IsEmbedded = $true
+$script:BoxerVersion = "0.1.103"
+$script:LoadedModules = @{}
+$script:Commands = @{}
+$script:CommandRegistry = @{}
 $script:BaseDir = $BaseDir
 $script:BoxDir = $BoxDir
 $script:VendorDir = Join-Path $BaseDir "vendor"
 $script:TempDir = Join-Path $BaseDir "temp"
 $script:StateFile = Join-Path $BoxDir "state.json"
 
-# ============================================================================
-# EMBEDDED boxing.ps1 (bootstrapper functions)
-# ============================================================================
-
-# BEGIN boxing.ps1 (functions only)
-# Boxing - Common bootstrapper for boxer and box
+# BEGIN core/bootstrapper.ps1
+# Bootstrapper - Core initialization and mode detection
 #
-# This script serves as the shared foundation for both boxer.ps1 (global manager)
-# and box.ps1 (project manager). It handles:
+# Handles:
 # - Mode detection (boxer vs box)
 # - Core library loading
-# - Module discovery and loading
-# - Command dispatching
+# - Global variables initialization
 
 # Strict mode for better error detection
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 # Global variables
-$script:BoxingRoot = $PSScriptRoot
-$script:Mode = $null
-$script:LoadedModules = @{}
-$script:Commands = @{}
-$script:CommandRegistry = @{}
+if (-not $script:BoxingRoot) { $script:BoxingRoot = Split-Path -Parent $PSScriptRoot }
+if (-not $script:Mode) { $script:Mode = $null }
+if (-not $script:LoadedModules) { $script:LoadedModules = @{} }
+if (-not $script:Commands) { $script:Commands = @{} }
+if (-not $script:CommandRegistry) { $script:CommandRegistry = @{} }
+if (-not (Get-Variable -Name BoxerVersion -Scope Script -ErrorAction SilentlyContinue)) {
+    $script:BoxerVersion = $null
+}
 
 # Embedded flag - set to $true by build process for compiled versions
 if (-not (Get-Variable -Name IsEmbedded -Scope Script -ErrorAction SilentlyContinue)) {
@@ -114,6 +112,7 @@ function Initialize-Mode {
 
     return $script:Mode
 }
+
 # Load core libraries
 function Import-CoreLibraries {
     # Skip if embedded version - libraries already loaded
@@ -128,7 +127,9 @@ function Import-CoreLibraries {
         throw "Core directory not found: $corePath"
     }
 
-    $coreFiles = Get-ChildItem -Path $corePath -Filter '*.ps1' | Sort-Object Name
+    $coreFiles = Get-ChildItem -Path $corePath -Filter '*.ps1' |
+        Where-Object { $_.Name -notin @('bootstrapper.ps1', 'module-loader.ps1', 'dispatcher.ps1', 'metadata.ps1') } |
+        Sort-Object Name
 
     foreach ($file in $coreFiles) {
         try {
@@ -141,24 +142,209 @@ function Import-CoreLibraries {
     }
 }
 
-# Build list of external module roots by mode and priority
-# box-override: External modules in .box/modules/ and modules/ override embedded modules
-function Get-ExternalModuleRoots {
-    param([string]$Mode)
+# Main bootstrapping function
+function Initialize-Boxing {
+    param(
+        [string[]]$Arguments = @()
+    )
 
-    $roots = @()
+    try {
+        # Auto-installation/update if executed via irm|iex (no $PSScriptRoot)
+        if (-not $PSScriptRoot -and $Arguments.Count -eq 0) {
+            $BoxerInstalled = "$env:USERPROFILE\Documents\PowerShell\Boxing\boxer.ps1"
 
-    if ($Mode -eq 'box') {
-        $projectRoot = Get-Location
-        # box-override priority: custom modules before project modules
-        $roots += @{ Path = Join-Path $projectRoot '.box\modules'; Source = 'custom' }
-        $roots += @{ Path = Join-Path $projectRoot 'modules'; Source = 'project' }
+            # 1. Check if already installed
+            if (Test-Path $BoxerInstalled) {
+                # 2. Compare versions
+                $InstalledContent = Get-Content $BoxerInstalled -Raw
+                $InstalledVersion = if ($InstalledContent -match 'Version:\s*(\S+)') { $Matches[1] } else { $null }
+
+                # Get current version via core API (works in all modes)
+                $CurrentVersion = Get-BoxerVersion
+
+                # 3. Decision: upgrade only if new version > installed version
+                try {
+                    if ($InstalledVersion -and $CurrentVersion -and ([version]$CurrentVersion -gt [version]$InstalledVersion)) {
+                        Write-Host ""
+                        Write-Host "🔄 Boxer update: $InstalledVersion → $CurrentVersion" -ForegroundColor Cyan
+                        Install-BoxingSystem | Out-Null
+
+                        # Check if we're in a project directory with .box
+                        Update-LocalBoxIfNeeded
+                        return
+                    } elseif ($InstalledVersion -and $CurrentVersion) {
+                        # Already up-to-date or newer installed
+                        Write-Host "✓ Boxer already up-to-date (v$InstalledVersion)" -ForegroundColor Green
+                        # Check if box needs update (Install-BoxingSystem handles this)
+                        Install-BoxingSystem | Out-Null
+
+                        # Check if we're in a project directory with .box
+                        Update-LocalBoxIfNeeded
+                        return
+                    }
+                } catch {
+                    # Version parsing failed, skip update
+                }
+            } else {
+                # First-time installation
+                Install-BoxingSystem | Out-Null
+                return
+            }
+        }
+
+        # Step 1: Detect mode
+        $mode = Initialize-Mode
+        Write-Verbose "Mode: $mode"
+
+        # Step 2: Load core libraries
+        Import-CoreLibraries
+        Write-Verbose "Core libraries loaded"
+
+        # Step 3: Load mode-specific modules
+        Import-ModeModules -Mode $mode
+        Write-Verbose "Mode modules loaded: $($script:Commands.Count) commands"
+
+        # Step 4: Load shared modules
+        Import-SharedModules
+        Write-Verbose "Shared modules loaded"
+
+        # Step 5: Dispatch command
+        if ($Arguments.Count -gt 0) {
+            $command = $Arguments[0]
+            $cmdArgs = if ($Arguments.Count -gt 1) {
+                $Arguments[1..($Arguments.Count - 1)]
+            } else {
+                @()
+            }
+
+            $exitCode = Invoke-Command -CommandName $command -Arguments $cmdArgs
+            if ($exitCode -and $exitCode -ne 0) { return $exitCode }
+            return
+        }
+        else {
+            Show-Help
+            return
+        }
     }
-    else {
-        $roots += @{ Path = Join-Path $script:BoxingRoot 'modules'; Source = 'custom' }
+    catch {
+        Write-Error "Boxing initialization failed: $_"
+        return 1
+    }
+}
+
+# Update local .box directory if needed
+function Update-LocalBoxIfNeeded {
+    try {
+        $currentDir = Get-Location
+        $localBoxDir = $null
+
+        # Search for .box directory
+        $testDir = $currentDir
+        while ($testDir) {
+            $boxPath = Join-Path $testDir '.box'
+            if (Test-Path $boxPath) {
+                $localBoxDir = $boxPath
+                break
+            }
+
+            $parent = Split-Path $testDir -Parent
+            if (-not $parent -or $parent -eq $testDir) { break }
+            $testDir = $parent
+        }
+
+        if (-not $localBoxDir) { return }
+
+        # Check version
+        $localBoxPs1 = Join-Path $localBoxDir 'box.ps1'
+        if (-not (Test-Path $localBoxPs1)) { return }
+
+        $localContent = Get-Content $localBoxPs1 -Raw
+        $localVersion = if ($localContent -match 'Version:\s*(\S+)') { $Matches[1] } else { $null }
+        $newVersion = Get-BoxerVersion
+
+        if (-not $localVersion -or -not $newVersion) { return }
+
+        if ([version]$newVersion -gt [version]$localVersion) {
+            Write-Host ""
+            Write-Host "🔄 Updating local .box to v$newVersion" -ForegroundColor Cyan
+
+            # Copy new box.ps1
+            $boxerDir = "$env:USERPROFILE\Documents\PowerShell\Boxing"
+            $sourceBox = Join-Path $boxerDir 'box.ps1'
+            if (Test-Path $sourceBox) {
+                Copy-Item -Path $sourceBox -Destination $localBoxPs1 -Force
+            }
+
+            # Remove boxer.ps1 if it was copied (not needed in projects)
+            $boxerInProject = Join-Path $localBoxDir "boxer.ps1"
+            if (Test-Path $boxerInProject) {
+                Remove-Item -Path $boxerInProject -Force
+            }
+
+            Write-Host "✓ Local .box updated to v$newVersion" -ForegroundColor Green
+            Write-Host ""
+            Write-Host "⚠ Restart your PowerShell session to use the new version" -ForegroundColor Yellow
+        }
+
+    } catch {
+        Write-Verbose "Failed to update local .box: $_"
+    }
+}
+
+# END core/bootstrapper.ps1
+# BEGIN core/metadata.ps1
+# Metadata - Handler and descriptor utilities
+#
+# Handles:
+# - Metadata handler resolution
+# - Descriptor field access
+# - Descriptor help display
+# - Handler invocation
+
+# Parse metadata handler string into executable descriptor
+function Resolve-MetadataHandler {
+    param(
+        [string]$ModulePath,
+        [string]$Value
+    )
+
+    if (-not $Value) { return $null }
+
+    if ($Value -like '*::*') {
+        $parts = $Value -split '::', 2
+        return @{
+            Type = 'file-function'
+            Path = Join-Path $ModulePath $parts[0]
+            Function = $parts[1]
+        }
     }
 
-    return $roots | Where-Object { Test-Path $_.Path }
+    if ($Value -like '*.ps1') {
+        return @{
+            Type = 'script'
+            Path = Join-Path $ModulePath $Value
+        }
+    }
+
+    return @{
+        Type = 'function'
+        Function = $Value
+        ModulePath = $ModulePath
+    }
+}
+
+# Safe descriptor lookup
+function Get-DescriptorField {
+    param(
+        [hashtable]$Descriptor,
+        [string]$Key
+    )
+
+    if ($Descriptor -and $Descriptor.ContainsKey($Key)) {
+        return $Descriptor[$Key]
+    }
+
+    return $null
 }
 
 # Execute handler descriptor consistently
@@ -231,50 +417,34 @@ function Show-DescriptorHelp {
     }
 }
 
-# Safe descriptor lookup
-function Get-DescriptorField {
-    param(
-        [hashtable]$Descriptor,
-        [string]$Key
-    )
+# END core/metadata.ps1
+# BEGIN core/module-loader.ps1
+# Module Loader - Module discovery and registration
+#
+# Handles:
+# - External module discovery
+# - Module registration (file, directory, metadata)
+# - Mode-specific module loading
+# - Shared module loading
 
-    if ($Descriptor -and $Descriptor.ContainsKey($Key)) {
-        return $Descriptor[$Key]
+# Build list of external module roots by mode and priority
+# box-override: External modules in .box/modules/ and modules/ override embedded modules
+function Get-ExternalModuleRoots {
+    param([string]$Mode)
+
+    $roots = @()
+
+    if ($Mode -eq 'box') {
+        $projectRoot = Get-Location
+        # box-override priority: custom modules before project modules
+        $roots += @{ Path = Join-Path $projectRoot '.box\modules'; Source = 'custom' }
+        $roots += @{ Path = Join-Path $projectRoot 'modules'; Source = 'project' }
+    }
+    else {
+        $roots += @{ Path = Join-Path $script:BoxingRoot 'modules'; Source = 'custom' }
     }
 
-    return $null
-}
-
-# Parse metadata handler string into executable descriptor
-function Resolve-MetadataHandler {
-    param(
-        [string]$ModulePath,
-        [string]$Value
-    )
-
-    if (-not $Value) { return $null }
-
-    if ($Value -like '*::*') {
-        $parts = $Value -split '::', 2
-        return @{
-            Type = 'file-function'
-            Path = Join-Path $ModulePath $parts[0]
-            Function = $parts[1]
-        }
-    }
-
-    if ($Value -like '*.ps1') {
-        return @{
-            Type = 'script'
-            Path = Join-Path $ModulePath $Value
-        }
-    }
-
-    return @{
-        Type = 'function'
-        Function = $Value
-        ModulePath = $ModulePath
-    }
+    return $roots | Where-Object { Test-Path $_.Path }
 }
 
 # Register external modules (files, directories, metadata)
@@ -555,43 +725,86 @@ function Register-EmbeddedCommands {
     $modeName = if ($Mode) { ($Mode.Substring(0,1).ToUpper() + $Mode.Substring(1).ToLower()) } else { $Mode }
     $prefix = "Invoke-$modeName-"
     $functions = Get-Command -Name "$prefix*" -CommandType Function -ErrorAction SilentlyContinue | Sort-Object Name
-    $registered = @{}
+
+    # Group functions by command
+    $commandGroups = @{}
 
     foreach ($func in $functions) {
         $funcName = $func.Name
         $namePart = $funcName.Substring($prefix.Length)
-        $commandName = ($namePart -split '-', 2)[0].ToLower()
 
-        if ($registered.ContainsKey($commandName)) {
-            Write-Verbose "Skipping duplicate embedded command: $commandName from $funcName"
+        # Split into Command and (Optional) Subcommand
+        # Invoke-Box-Pkg -> "pkg" (no subcommand)
+        # Invoke-Box-Pkg-Install -> "pkg", "install"
+
+        $parts = $namePart -split '-', 2
+        $commandName = $parts[0].ToLower()
+        $subcommandName = if ($parts.Count -gt 1) { $parts[1].ToLower() } else { $null }
+
+        if (-not $commandGroups.ContainsKey($commandName)) {
+            $commandGroups[$commandName] = @{
+                DefaultHandler = $null
+                Subcommands = @{}
+                Synopsis = $null
+            }
+        }
+
+        $group = $commandGroups[$commandName]
+
+        if (-not $subcommandName) {
+            # This is the Default Handler (e.g. Invoke-Box-Pkg)
+            $group.DefaultHandler = $funcName
+
+            # Extract synopsis from main handler
+            $helpInfo = Get-Help $funcName -ErrorAction SilentlyContinue
+            if ($helpInfo -and $helpInfo.Synopsis -and $helpInfo.Synopsis -ne $funcName) {
+                 $group.Synopsis = $helpInfo.Synopsis
+            }
+        } else {
+            # This is a Subcommand (e.g. Invoke-Box-Pkg-Install)
+            $group.Subcommands[$subcommandName] = $funcName
+        }
+    }
+
+    # Register commands
+    foreach ($entry in $commandGroups.GetEnumerator()) {
+        $commandName = $entry.Key
+        $group = $entry.Value
+
+        if ($script:CommandRegistry.ContainsKey($commandName)) {
+            Write-Verbose "Skipping duplicate embedded command: $commandName"
             continue
         }
 
         if (-not $script:Commands.ContainsKey($commandName)) {
-            $script:Commands[$commandName] = $funcName
+            $script:Commands[$commandName] = if ($group.DefaultHandler) { $group.DefaultHandler } else { "group:$commandName" }
         }
-        $registered[$commandName] = $true
 
-        if (-not $script:CommandRegistry.ContainsKey($commandName)) {
-            # Extract synopsis from function's help comment
-            $helpInfo = Get-Help $funcName -ErrorAction SilentlyContinue
-            $synopsis = if ($helpInfo -and $helpInfo.Synopsis -and $helpInfo.Synopsis -ne $funcName) {
-                $helpInfo.Synopsis
-            } else {
-                $null
-            }
+        # Determine Kind
+        # If it has subcommands, treat as 'external-directory' (supports Subcommands + DefaultHandler)
+        # If ONLY default handler, treat as 'embedded' (simple)
 
-            $script:CommandRegistry[$commandName] = @{
+        if ($group.Subcommands.Count -gt 0) {
+             $script:CommandRegistry[$commandName] = @{
+                Name = $commandName
+                Kind = 'external-directory' # Reusing logic that supports Subcommands + DefaultHandler
+                Source = 'built-in'
+                Subcommands = $group.Subcommands
+                DefaultHandler = $group.DefaultHandler
+                Synopsis = $group.Synopsis
+             }
+             Write-Verbose "Registered embedded group: $commandName ($($group.Subcommands.Count) subcommands)"
+        } else {
+             $script:CommandRegistry[$commandName] = @{
                 Name = $commandName
                 Kind = 'embedded'
                 Source = 'built-in'
-                Handler = $funcName
-                Path = $func.ScriptBlock.File
-                Synopsis = $synopsis
-            }
+                Handler = $group.DefaultHandler
+                Path = (Get-Command $group.DefaultHandler).ScriptBlock.File
+                Synopsis = $group.Synopsis
+             }
+             Write-Verbose "Registered embedded command: $commandName -> $($group.DefaultHandler)"
         }
-
-        Write-Verbose "Registered embedded command: $commandName → $funcName"
     }
 }
 
@@ -698,6 +911,16 @@ function Import-SharedModules {
     }
 }
 
+# END core/module-loader.ps1
+# BEGIN core/dispatcher.ps1
+# Dispatcher - Command routing and invocation
+#
+# Handles:
+# - Command dispatching
+# - Help system integration
+# - Subcommand routing
+# - Dispatcher descriptor invocation
+
 # Show available subcommands for directory/metadata modules
 function Show-SubcommandHelp {
     param(
@@ -725,7 +948,6 @@ function Show-SubcommandHelp {
 
     $lines | ForEach-Object { Write-Output $_ }
 }
-
 
 # Invoke dispatcher descriptor with explicit parameters
 function Invoke-DispatcherDescriptor {
@@ -949,8 +1171,8 @@ function Show-Help {
             }
 
             if ($helpHandler) {
-                    $helpOutput = & $helpHandler @()
-                    if ($helpOutput) { $helpOutput | ForEach-Object { Write-Output $_ } }
+                $helpOutput = & $helpHandler @()
+                if ($helpOutput) { $helpOutput | ForEach-Object { Write-Output $_ } }
                 return
             }
 
@@ -1004,173 +1226,10 @@ function Show-Help {
     }
 }
 
-# Update local .box if we're in a project and box matches current source
-function Update-LocalBoxIfNeeded {
-    # Check if .box exists in current directory
-    $localBoxDir = Join-Path (Get-Location) ".box"
-    if (-not (Test-Path $localBoxDir)) {
-        return
-    }
-
-    # Read local box metadata
-    $localMetadataPath = Join-Path $localBoxDir "metadata.psd1"
-    if (-not (Test-Path $localMetadataPath)) {
-        return
-    }
-
-    try {
-        $localMetadata = Import-PowerShellDataFile -Path $localMetadataPath
-        $localBoxName = $localMetadata.BoxName
-        $localVersion = $localMetadata.Version
-
-        # Get current script's box name (embedded variable set at build time)
-        $scriptBoxName = if ($script:BoxName) { $script:BoxName } else { "AmiDevBox" }
-
-        if ($localBoxName -ne $scriptBoxName) {
-            Write-Verbose "Local box is $localBoxName, script is $scriptBoxName - skipping update"
-            return
-        }
-
-        # Get new version from current script
-        $newVersion = Get-BoxerVersion
-
-        # Compare versions
-        if ($localVersion -eq $newVersion) {
-            Write-Host ""
-            Write-Host "=== Local .box ===" -ForegroundColor Cyan
-            Write-Host "✓ Already up-to-date (v$localVersion)" -ForegroundColor Green
-            return
-        }
-
-        # Update needed
-        Write-Host ""
-        Write-Host "=== Updating local .box ===" -ForegroundColor Cyan
-        Write-Host "  $localVersion → $newVersion" -ForegroundColor Gray
-
-        # Get source from Boxing/Boxes
-        $BoxingDir = "$env:USERPROFILE\Documents\PowerShell\Boxing"
-        $SourceBoxDir = Join-Path $BoxingDir "Boxes\$scriptBoxName"
-
-        if (-not (Test-Path $SourceBoxDir)) {
-            Write-Host "  ⚠ Source not found, skipping update" -ForegroundColor Yellow
-            return
-        }
-
-        # Remove and recreate .box
-        Remove-Item -Path $localBoxDir -Recurse -Force -ErrorAction Stop
-        Copy-Item -Path $SourceBoxDir -Destination $localBoxDir -Recurse -Force -ErrorAction Stop
-
-        # Remove boxer.ps1 if it was copied (not needed in projects)
-        $boxerInProject = Join-Path $localBoxDir "boxer.ps1"
-        if (Test-Path $boxerInProject) {
-            Remove-Item -Path $boxerInProject -Force
-        }
-
-        Write-Host "✓ Local .box updated to v$newVersion" -ForegroundColor Green
-        Write-Host ""
-        Write-Host "⚠ Restart your PowerShell session to use the new version" -ForegroundColor Yellow
-
-    } catch {
-        Write-Verbose "Failed to update local .box: $_"
-    }
-}
-
-# Main bootstrapping function
-function Initialize-Boxing {
-    param(
-        [string[]]$Arguments = @()
-    )
-
-    try {
-        # Auto-installation/update if executed via irm|iex (no $PSScriptRoot)
-        if (-not $PSScriptRoot -and $Arguments.Count -eq 0) {
-            $BoxerInstalled = "$env:USERPROFILE\Documents\PowerShell\Boxing\boxer.ps1"
-
-            # 1. Check if already installed
-            if (Test-Path $BoxerInstalled) {
-                # 2. Compare versions
-                $InstalledContent = Get-Content $BoxerInstalled -Raw
-                $InstalledVersion = if ($InstalledContent -match 'Version:\s*(\S+)') { $Matches[1] } else { $null }
-
-                # Get current version via core API (works in all modes)
-                $CurrentVersion = Get-BoxerVersion
-
-                # 3. Decision: upgrade only if new version > installed version
-                try {
-                    if ($InstalledVersion -and $CurrentVersion -and ([version]$CurrentVersion -gt [version]$InstalledVersion)) {
-                        Write-Host ""
-                        Write-Host "🔄 Boxer update: $InstalledVersion → $CurrentVersion" -ForegroundColor Cyan
-                        Install-BoxingSystem | Out-Null
-
-                        # Check if we're in a project directory with .box
-                        Update-LocalBoxIfNeeded
-                        return
-                    } elseif ($InstalledVersion -and $CurrentVersion) {
-                        # Already up-to-date or newer installed
-                        Write-Host "✓ Boxer already up-to-date (v$InstalledVersion)" -ForegroundColor Green
-                        # Check if box needs update (Install-BoxingSystem handles this)
-                        Install-BoxingSystem | Out-Null
-
-                        # Check if we're in a project directory with .box
-                        Update-LocalBoxIfNeeded
-                        return
-                    }
-                } catch {
-                    # Version parsing failed, skip update
-                }
-            } el
-                # Check if we're in a project directory with .box
-                Update-LocalBoxIfNeeded
-                se {
-                # First-time installation
-                Install-BoxingSystem | Out-Null
-                return
-            }
-        }
-        # Step 1: Detect mode
-        $mode = Initialize-Mode
-        Write-Verbose "Mode: $mode"
-
-        # Step 2: Load core libraries
-        Import-CoreLibraries
-        Write-Verbose "Core libraries loaded"
-
-        # Step 3: Load mode-specific modules
-        Import-ModeModules -Mode $mode
-        Write-Verbose "Mode modules loaded: $($script:Commands.Count) commands"
-
-        # Step 4: Load shared modules
-        Import-SharedModules
-        Write-Verbose "Shared modules loaded"
-
-        # Step 5: Dispatch command
-        if ($Arguments.Count -gt 0) {
-            $command = $Arguments[0]
-            $cmdArgs = if ($Arguments.Count -gt 1) {
-                $Arguments[1..($Arguments.Count - 1)]
-            } else {
-                @()
-            }
-
-            $exitCode = Invoke-Command -CommandName $command -Arguments $cmdArgs
-            if ($exitCode -and $exitCode -ne 0) { return $exitCode }
-            return
-        }
-        else {
-            Show-Help
-            return
-        }
-    }
-    catch {
-        Write-Error "Boxing initialization failed: $_"
-        return 1
-    }
-}
-
-# END boxing.ps1
+# END core/dispatcher.ps1
 
 # ============================================================================
-# EMBEDDED core/*.ps1 (shared libraries)
+# EMBEDDED src/core/*.ps1 (shared libraries)
 # ============================================================================
 
 # BEGIN core/common.ps1
@@ -1186,6 +1245,76 @@ function Initialize-Boxing {
 # ============================================================================
 # Utility Functions
 # ============================================================================
+
+function Invoke-Handler {
+    <#
+    .SYNOPSIS
+    Invokes a module handler in both embedded and standalone modes
+
+    .DESCRIPTION
+    Routes to the appropriate handler based on mode:
+    - Embedded: Calls function (e.g., Invoke-Box-Pkg-List)
+    - Standalone: Executes file (e.g., modules/box/pkg/list.ps1)
+
+    .PARAMETER Module
+    Module name (e.g., "pkg", "env")
+
+    .PARAMETER Handler
+    Handler name (e.g., "list", "install")
+
+    .PARAMETER Arguments
+    Optional arguments to pass to the handler
+
+    .EXAMPLE
+    Invoke-Handler -Module "pkg" -Handler "list"
+    Routes to list.ps1 or Invoke-Box-Pkg-List depending on mode
+
+    .EXAMPLE
+    Invoke-Handler -Module "env" -Handler "load" -Arguments @("dev")
+    Routes to env/load.ps1 or Invoke-Box-Env-Load with "dev" arg
+    #>
+    param(
+        [Parameter(Mandatory=$true)]
+        [string]$Module,
+
+        [Parameter(Mandatory=$true)]
+        [string]$Handler,
+
+        [Parameter(ValueFromRemainingArguments=$true)]
+        [string[]]$Arguments
+    )
+
+    if ($script:IsEmbedded) {
+        # Embedded mode: call function
+        # Convert module/handler to function name: pkg/list -> Invoke-Box-Pkg-List
+        $parts = @($script:Mode) + $Module.Split('/') + $Handler.Split('/')
+        $funcName = "Invoke-" + ($parts | ForEach-Object {
+            $_.Substring(0,1).ToUpper() + $_.Substring(1).ToLower()
+        }) -join '-'
+
+        if (Get-Command $funcName -ErrorAction SilentlyContinue) {
+            if ($Arguments) {
+                & $funcName @Arguments
+            } else {
+                & $funcName
+            }
+        } else {
+            Write-Error "Handler function not found: $funcName"
+        }
+    } else {
+        # Standalone mode: execute file
+        $handlerPath = Join-Path $PSScriptRoot "..\modules\$($script:Mode)\$Module\$Handler.ps1"
+        if (Test-Path $handlerPath) {
+            if ($Arguments) {
+                & $handlerPath @Arguments
+            } else {
+                & $handlerPath
+            }
+        } else {
+            Write-Error "Handler file not found: $handlerPath"
+        }
+    }
+}
 
 function Get-DescriptorField {
     <#
@@ -2698,7 +2827,7 @@ function Ensure-SevenZip {
 
 .NOTES
     Module: templates.ps1
-    Version: 0.1.101
+    Version: 0.1.103
 #>
 
 # ============================================================================
@@ -3808,6 +3937,7 @@ function Get-BoxerVersion {
     }
 
     # 2. Try reading from source file (development mode)
+    # In src/ structure, boxer.version is at same level as core/
     $versionFile = Join-Path $script:BoxingRoot "boxer.version"
     if (Test-Path $versionFile) {
         $version = (Get-Content $versionFile -Raw).Trim()
@@ -3823,6 +3953,11 @@ function Get-BoxerVersion {
         if ($content -match 'Version:\s*(\S+)') {
             return $Matches[1]
         }
+    }
+
+    # 4. Development mode (no version set)
+    if (-not $script:IsEmbedded) {
+        return "DEV"
     }
 
     # Not found
@@ -3891,289 +4026,298 @@ function Invoke-ConfigWizard {
 # END core/wizard.ps1
 
 # ============================================================================
-# EMBEDDED modules/box/*.ps1 (box commands)
+# EMBEDDED src/modules/box/*.ps1 (box commands + pkg submodule)
 # ============================================================================
 
 # BEGIN modules/box/clean.ps1
+function Invoke-Box-Clean {
+    param([string[]]$Arguments)
 # ============================================================================
 # Box Clean Module
 # ============================================================================
 #
 # Handles box clean command - cleaning build artifacts
 
-function Invoke-Box-Clean {
-    <#
-    .SYNOPSIS
-    Cleans build artifacts from the project.
+<#
+.SYNOPSIS
+    AmiDevBox - Complete Amiga development environment setup system
 
-    .EXAMPLE
-    box clean
-    #>
+.EXAMPLE
+box clean
+#>
 
-    Write-Title "Cleaning Build Artifacts"
+Write-Title "Cleaning Build Artifacts"
 
-    # Clean common build directories
-    $cleanDirs = @('build', 'dist', 'out', 'bin', 'obj')
+# Clean common build directories
+$cleanDirs = @('build', 'dist', 'out', 'bin', 'obj')
 
-    foreach ($dir in $cleanDirs) {
-        $dirPath = Join-Path $BaseDir $dir
-        if (Test-Path $dirPath) {
-            Remove-Item $dirPath -Recurse -Force -ErrorAction SilentlyContinue
-            Write-Success "Removed: $dir/"
-        }
+foreach ($dir in $cleanDirs) {
+    $dirPath = Join-Path $BaseDir $dir
+    if (Test-Path $dirPath) {
+        Remove-Item $dirPath -Recurse -Force -ErrorAction SilentlyContinue
+        Write-Success "Removed: $dir/"
     }
-
-    # Clean temp files
-    Get-ChildItem -Path $BaseDir -Filter "*.tmp" -Recurse | Remove-Item -Force -ErrorAction SilentlyContinue
-    Get-ChildItem -Path $BaseDir -Filter "*.log" -Recurse | Remove-Item -Force -ErrorAction SilentlyContinue
-
-    Write-Success "Clean complete"
 }
 
+# Clean temp files
+Get-ChildItem -Path $BaseDir -Filter "*.tmp" -Recurse | Remove-Item -Force -ErrorAction SilentlyContinue
+Get-ChildItem -Path $BaseDir -Filter "*.log" -Recurse | Remove-Item -Force -ErrorAction SilentlyContinue
+
+Write-Success "Clean complete"
+
+
+}
 # END modules/box/clean.ps1
-# BEGIN modules/box/env.ps1
+# BEGIN modules/box/env\env.ps1
+function Invoke-Box-Env-Env {
+    param([string[]]$Arguments)
 # ============================================================================
 # Box Env Module - Main Dispatcher
 # ============================================================================
 #
 # Handles box env command with subcommands (list, load, replace, update)
 
-function Invoke-Box-Env {
-    <#
-    .SYNOPSIS
-    Manages environment variables for the project.
+<#
+.SYNOPSIS
+    AmiDevBox - Complete Amiga development environment setup system
 
-    .PARAMETER Sub
-    Subcommand to execute: list, load, replace, update
+.PARAMETER Sub
+Subcommand to execute: list, load, replace, update
 
-    .EXAMPLE
-    box env list
-    box env load
-    box env replace KEY=VALUE
-    box env update
-    #>
+.EXAMPLE
+box env list
+box env load
+box env replace KEY=VALUE
+box env update
+#>
 
-    param(
-        [Parameter(Position=0)]
-        [string]$Sub
-    )
+param(
+    [Parameter(Position=0)]
+    [string]$Sub
+)
 
-    # Default to list if no subcommand
-    if (-not $Sub) {
-        $Sub = 'list'
+# Default to list if no subcommand
+if (-not $Sub) {
+    $Sub = 'list'
+}
+
+# Dispatch to appropriate subcommand
+switch ($Sub.ToLower()) {
+    'list' {
+        Invoke-Box-Env-List
     }
-
-    # Dispatch to appropriate subcommand
-    switch ($Sub.ToLower()) {
-        'list' {
-            Invoke-Box-Env-List
-        }
-        'load' {
-            Invoke-Box-Env-Load
-        }
-        'replace' {
-            Invoke-Box-Env-Replace -KeyValue $args
-        }
-        'update' {
-            Invoke-Box-Env-Update
-        }
-        default {
-            Write-Host "Unknown env subcommand: $Sub" -ForegroundColor Red
-            Write-Host "Available: list, load, replace, update" -ForegroundColor Gray
-            exit 1
-        }
+    'load' {
+        Invoke-Box-Env-Load
+    }
+    'replace' {
+        Invoke-Box-Env-Replace -KeyValue $args
+    }
+    'update' {
+        Invoke-Box-Env-Update
+    }
+    default {
+        Write-Host "Unknown env subcommand: $Sub" -ForegroundColor Red
+        Write-Host "Available: list, load, replace, update" -ForegroundColor Gray
+        exit 1
     }
 }
 
-# END modules/box/env.ps1
+}
+# END modules/box/env\env.ps1
 # BEGIN modules/box/env\list.ps1
+function Invoke-Box-Env-List {
+    param([string[]]$Arguments)
 # ============================================================================
 # Box Env Module - List subcommand
 # ============================================================================
 
-function Invoke-Box-Env-List {
-    <#
-    .SYNOPSIS
-    Displays all environment variables configured for the project.
+<#
+.SYNOPSIS
+    AmiDevBox - Complete Amiga development environment setup system
 
-    .EXAMPLE
-    box env list
-    box env
-    #>
+.EXAMPLE
+box env list
+box env
+#>
+param()
 
-    Write-Host ""
-    Write-Host "Environment Variables:" -ForegroundColor Cyan
-    Write-Host ""
+Write-Host ""
+Write-Host "Environment Variables:" -ForegroundColor Cyan
+Write-Host ""
 
-    $state = Load-State
-    if ($state.packages) {
-        foreach ($pkgName in $state.packages.Keys) {
-            $pkg = $state.packages[$pkgName]
-            if ($pkg.envs) {
-                Write-Host "  $pkgName" -ForegroundColor White
-                foreach ($envName in $pkg.envs.Keys) {
-                    $envValue = $pkg.envs[$envName]
-                    Write-Host ("    {0,-20} = {1}" -f $envName, $envValue) -ForegroundColor Gray
-                }
+$state = Load-State
+if ($state.packages) {
+    foreach ($pkgName in $state.packages.Keys) {
+        $pkg = $state.packages[$pkgName]
+        if ($pkg.envs) {
+            Write-Host "  $pkgName" -ForegroundColor White
+            foreach ($envName in $pkg.envs.Keys) {
+                $envValue = $pkg.envs[$envName]
+                Write-Host ("    {0,-20} = {1}" -f $envName, $envValue) -ForegroundColor Gray
             }
         }
-    } else {
-        Write-Info "No packages installed yet"
     }
-
-    Write-Host ""
+} else {
+    Write-Info "No packages installed yet"
 }
 
+Write-Host ""
+
+}
 # END modules/box/env\list.ps1
 # BEGIN modules/box/env\load.ps1
+function Invoke-Box-Env-Load {
+    param([string[]]$Arguments)
 # ============================================================================
 # Box Env Module - Load subcommand
 # ============================================================================
 
-function Invoke-Box-Env-Load {
-    <#
-    .SYNOPSIS
-    Loads .env file into current PowerShell session environment variables.
+<#
+.SYNOPSIS
+    AmiDevBox - Complete Amiga development environment setup system
 
-    .DESCRIPTION
-    Reads .env file and sets all variables as environment variables in the
-    current PowerShell session. Also adds .box/ and scripts/ to PATH.
+.DESCRIPTION
+Reads .env file and sets all variables as environment variables in the
+current PowerShell session. Also adds .box/ and scripts/ to PATH.
 
-    .EXAMPLE
-    box env load
-    #>
+.EXAMPLE
+box env load
+#>
+param()
 
-    $envFile = Join-Path $BaseDir ".env"
+$envFile = Join-Path $BaseDir ".env"
 
-    if (-not (Test-Path $envFile)) {
-        Write-Err ".env file not found. Run 'box env update' first."
-        return
-    }
-
-    $loadedCount = 0
-    Get-Content $envFile | ForEach-Object {
-        if ($_ -match '^([^#=]+)=(.*)$') {
-            $key = $matches[1].Trim()
-            $value = $matches[2].Trim()
-            Set-Item "env:$key" $value
-            $loadedCount++
-        }
-    }
-
-    # Add .box and scripts to PATH
-    $boxPath = Join-Path $BaseDir ".box"
-    $scriptsPath = Join-Path $BaseDir "scripts"
-    $env:PATH = "$boxPath;$scriptsPath;$env:PATH"
-
-    Write-Success "Loaded $loadedCount variables from .env into session"
-    Write-Info "Added to PATH: .box/, scripts/"
+if (-not (Test-Path $envFile)) {
+    Write-Err ".env file not found. Run 'box env update' first."
+    return
 }
 
+$loadedCount = 0
+Get-Content $envFile | ForEach-Object {
+    if ($_ -match '^([^#=]+)=(.*)$') {
+        $key = $matches[1].Trim()
+        $value = $matches[2].Trim()
+        Set-Item "env:$key" $value
+        $loadedCount++
+    }
+}
+
+# Add .box and scripts to PATH
+$boxPath = Join-Path $BaseDir ".box"
+$scriptsPath = Join-Path $BaseDir "scripts"
+$env:PATH = "$boxPath;$scriptsPath;$env:PATH"
+
+Write-Success "Loaded $loadedCount variables from .env into session"
+Write-Info "Added to PATH: .box/, scripts/"
+
+}
 # END modules/box/env\load.ps1
 # BEGIN modules/box/env\replace.ps1
+function Invoke-Box-Env-Replace {
+    param([string[]]$Arguments)
 # ============================================================================
 # Box Env Module - Replace subcommand
 # ============================================================================
 
-function Invoke-Box-Env-Replace {
-    <#
-    .SYNOPSIS
-    Replaces tagged values in files with environment variables.
+<#
+.SYNOPSIS
+    AmiDevBox - Complete Amiga development environment setup system
 
-    .DESCRIPTION
-    Processes files and replaces tagged values with current environment
-    variable values. Supports in-place updates (preserves tags) or
-    release mode (strips tags).
+.DESCRIPTION
+Processes files and replaces tagged values with current environment
+variable values. Supports in-place updates (preserves tags) or
+release mode (strips tags).
 
-    Syntaxes supported:
-    - ~value[VAR_NAME]~ : Universal tag
-    - Box-specific syntaxes via hooks (e.g., #define for C)
+Syntaxes supported:
+- ~value[VAR_NAME]~ : Universal tag
+- Box-specific syntaxes via hooks (e.g., #define for C)
 
-    .PARAMETER Path
-    Path pattern to files to process (e.g., *.md, src/, README.md)
+.PARAMETER Path
+Path pattern to files to process (e.g., *.md, src/, README.md)
 
-    .PARAMETER OutputDir
-    If specified, copies processed files to this directory with tags stripped.
-    If not specified, updates files in-place preserving tags.
+.PARAMETER OutputDir
+If specified, copies processed files to this directory with tags stripped.
+If not specified, updates files in-place preserving tags.
 
-    .PARAMETER Force
-    Required for in-place updates to prevent accidental overwrites.
+.PARAMETER Force
+Required for in-place updates to prevent accidental overwrites.
 
-    .EXAMPLE
-    box env replace *.md -Force
-    Updates all Markdown files in-place
+.EXAMPLE
+box env replace *.md -Force
+Updates all Markdown files in-place
 
-    .EXAMPLE
-    box env replace . -OutputDir dist/ -Force
-    Copies all files to dist/ with tags stripped (release mode)
-    #>
-    param(
-        [Parameter(Position = 0, Mandatory = $true)]
-        [string]$Path,
+.EXAMPLE
+box env replace . -OutputDir dist/ -Force
+Copies all files to dist/ with tags stripped (release mode)
+#>
+param(
+    [Parameter(Position = 0, Mandatory = $true)]
+    [string]$Path,
 
-        [Parameter(Mandatory = $false)]
-        [string]$OutputDir = $null,
+    [Parameter(Mandatory = $false)]
+    [string]$OutputDir = $null,
 
-        [switch]$Force
-    )
+    [switch]$Force
+)
 
-    # Load variables
-    $variables = Get-TemplateVariables
-    if ($variables.Count -eq 0) {
-        Write-Warn "No variables found in .env"
-        return
-    }
-
-    # Determine mode
-    $releaseMode = $null -ne $OutputDir
-
-    # Require -Force for in-place updates
-    if (-not $releaseMode -and -not $Force) {
-        Write-Err "In-place replacement requires -Force flag"
-        Write-Info "Use: box env replace $Path -Force"
-        return
-    }
-
-    # Create output directory if needed
-    if ($releaseMode -and -not (Test-Path $OutputDir)) {
-        New-Item -ItemType Directory -Path $OutputDir -Force | Out-Null
-    }
-
-    # Process files
-    Update-TaggedFiles -Path $Path -ReleaseMode:$releaseMode -Variables $variables
-
-    if ($releaseMode) {
-        Write-Success "Files processed to $OutputDir (tags stripped)"
-    } else {
-        Write-Success "Files updated in-place (tags preserved)"
-    }
+# Load variables
+$variables = Get-TemplateVariables
+if ($variables.Count -eq 0) {
+    Write-Warn "No variables found in .env"
+    return
 }
 
+# Determine mode
+$releaseMode = $null -ne $OutputDir
+
+# Require -Force for in-place updates
+if (-not $releaseMode -and -not $Force) {
+    Write-Err "In-place replacement requires -Force flag"
+    Write-Info "Use: box env replace $Path -Force"
+    return
+}
+
+# Create output directory if needed
+if ($releaseMode -and -not (Test-Path $OutputDir)) {
+    New-Item -ItemType Directory -Path $OutputDir -Force | Out-Null
+}
+
+# Process files
+Update-TaggedFiles -Path $Path -ReleaseMode:$releaseMode -Variables $variables
+
+if ($releaseMode) {
+    Write-Success "Files processed to $OutputDir (tags stripped)"
+} else {
+    Write-Success "Files updated in-place (tags preserved)"
+}
+
+}
 # END modules/box/env\replace.ps1
 # BEGIN modules/box/env\update.ps1
+function Invoke-Box-Env-Update {
+    param([string[]]$Arguments)
 # ============================================================================
 # Box Env Module - Update subcommand
 # ============================================================================
 
-function Invoke-Box-Env-Update {
-    <#
-    .SYNOPSIS
-    Updates .env file and VS Code settings from installed packages.
+<#
+.SYNOPSIS
+    AmiDevBox - Complete Amiga development environment setup system
 
-    .DESCRIPTION
-    Regenerates .env file from all installed package configurations,
-    updates VS Code terminal environment variables, and updates
-    tagged files throughout the project.
+.DESCRIPTION
+Regenerates .env file from all installed package configurations,
+updates VS Code terminal environment variables, and updates
+tagged files throughout the project.
 
-    .EXAMPLE
-    box env update
-    #>
+.EXAMPLE
+box env update
+#>
+param()
 
-    Generate-AllEnvFiles
-    Update-VSCodeEnv
-    Update-TaggedFiles -Path $BaseDir -Recurse
-    Write-Success ".env updated"
-}
+Generate-AllEnvFiles
+Update-VSCodeEnv
+Update-TaggedFiles -Path $BaseDir -Recurse
+Write-Success ".env updated"
 
 function Update-VSCodeEnv {
     <#
@@ -4244,586 +4388,270 @@ function Update-VSCodeEnv {
     }
 }
 
+}
 # END modules/box/env\update.ps1
 # BEGIN modules/box/info.ps1
+function Invoke-Box-Info {
+    param([string[]]$Arguments)
 # Box Info Command
 # Display detailed information for current box workspace
 
-function Invoke-Box-Info {
 <#
 .SYNOPSIS
     AmiDevBox - Complete Amiga development environment setup system
+
+.DESCRIPTION
+    Shows comprehensive information about the current Box workspace including:
+    - Box runtime version
+    - Box metadata (name, version, type, author, tags)
+    - Build date and core version
+    - Workspace configuration
+
+.EXAMPLE
+    box info
+    Displays all workspace information
 #>
-    Write-Host ""
-    Write-Host "Box Workspace Information" -ForegroundColor Cyan
-    Write-Host ("=" * 60) -ForegroundColor DarkGray
-    Write-Host ""
 
-    # Detect box.ps1 version (from embedded variable)
-    $BoxVersion = if ($script:BoxerVersion) {
-        $script:BoxerVersion
-    } else {
-        "Unknown"
-    }
+Write-Host ""
+Write-Host "Box Workspace Information" -ForegroundColor Cyan
+Write-Host ("=" * 60) -ForegroundColor DarkGray
+Write-Host ""
 
-    Write-Host "Box Runtime:" -ForegroundColor Yellow
-    Write-Host "  Version: $BoxVersion" -ForegroundColor Gray
-    Write-Host ""
+# Detect box.ps1 version (from embedded variable)
+$BoxVersion = if ($script:BoxerVersion) {
+    $script:BoxerVersion
+} else {
+    "Unknown"
+}
 
-    # Read box metadata
-    if ($script:BoxDir) {
-        $metadataFile = Join-Path $script:BoxDir "metadata.psd1"
+Write-Host "Box Runtime:" -ForegroundColor Yellow
+Write-Host "  Version: $BoxVersion" -ForegroundColor Gray
+Write-Host ""
 
-        if (Test-Path $metadataFile) {
-            try {
-                $metadata = Import-PowerShellDataFile -Path $metadataFile
+# Read box metadata
+if ($script:BoxDir) {
+    $metadataFile = Join-Path $script:BoxDir "metadata.psd1"
 
-                Write-Host "Box Information:" -ForegroundColor Yellow
-                Write-Host "  Name:         $($metadata.BoxName)" -ForegroundColor Gray
-                Write-Host "  Version:      $($metadata.Version)" -ForegroundColor Gray
+    if (Test-Path $metadataFile) {
+        try {
+            $metadata = Import-PowerShellDataFile -Path $metadataFile
 
-                if ($metadata.BoxerVersion) {
-                    Write-Host "  Core Version: $($metadata.BoxerVersion)" -ForegroundColor Gray
-                }
+            Write-Host "Box Information:" -ForegroundColor Yellow
+            Write-Host "  Name:         $($metadata.BoxName)" -ForegroundColor Gray
+            Write-Host "  Version:      $($metadata.Version)" -ForegroundColor Gray
 
-                if ($metadata.BuildDate) {
-                    Write-Host "  Build Date:   $($metadata.BuildDate)" -ForegroundColor Gray
-                }
-
-                if ($metadata.BoxType) {
-                    Write-Host "  Type:         $($metadata.BoxType)" -ForegroundColor Gray
-                }
-
-                if ($metadata.Author) {
-                    Write-Host "  Author:       $($metadata.Author)" -ForegroundColor Gray
-                }
-
-                if ($metadata.Tags) {
-                    Write-Host "  Tags:         $($metadata.Tags -join ', ')" -ForegroundColor Gray
-                }
-
-                Write-Host ""
-            } catch {
-                Write-Host "Error reading metadata: $_" -ForegroundColor Red
-                Write-Host ""
+            if ($metadata.BoxerVersion) {
+                Write-Host "  Core Version: $($metadata.BoxerVersion)" -ForegroundColor Gray
             }
-        } else {
-            Write-Host "No metadata.psd1 found in .box directory" -ForegroundColor Yellow
+
+            if ($metadata.BuildDate) {
+                Write-Host "  Build Date:   $($metadata.BuildDate)" -ForegroundColor Gray
+            }
+
+            if ($metadata.BoxType) {
+                Write-Host "  Type:         $($metadata.BoxType)" -ForegroundColor Gray
+            }
+
+            if ($metadata.Author) {
+                Write-Host "  Author:       $($metadata.Author)" -ForegroundColor Gray
+            }
+
+            if ($metadata.Tags) {
+                Write-Host "  Tags:         $($metadata.Tags -join ', ')" -ForegroundColor Gray
+            }
+
+            Write-Host ""
+        } catch {
+            Write-Host "Error reading metadata: $_" -ForegroundColor Red
             Write-Host ""
         }
-    }
-
-    # Workspace info
-    if ($script:BaseDir) {
-        Write-Host "Workspace:" -ForegroundColor Yellow
-        Write-Host "  Location: $script:BaseDir" -ForegroundColor Gray
+    } else {
+        Write-Host "No metadata.psd1 found in .box directory" -ForegroundColor Yellow
         Write-Host ""
     }
 }
 
+# Workspace info
+if ($script:BaseDir) {
+    Write-Host "Workspace:" -ForegroundColor Yellow
+    Write-Host "  Location: $script:BaseDir" -ForegroundColor Gray
+    Write-Host ""
+}
+
+
+}
 # END modules/box/info.ps1
 # BEGIN modules/box/install.ps1
+function Invoke-Box-Install {
+    param([string[]]$Arguments)
 # ============================================================================
 # Box Install Module
 # ============================================================================
 #
 # Handles box install command - installing packages in a project
 
-function Invoke-Box-Install {
-    <#
-    .SYNOPSIS
-    Installs all configured packages for the project.
+<#
+.SYNOPSIS
+    AmiDevBox - Complete Amiga development environment setup system
 
-    .EXAMPLE
-    box install
-    #>
+.DESCRIPTION
+Executes the complete installation workflow for a Box project:
+- Runs configuration wizard if needed
+- Creates required directories
+- Ensures 7-Zip is available
+- Processes and installs all configured packages
+- Generates Makefile and environment files
+- Displays installation summary
 
-    Write-Title "$($Config.Project.Name) Setup"
+.EXAMPLE
+box install
+Installs all packages defined in config.box
+#>
 
-    # Run config wizard if needed
-    if ($NeedsWizard) {
-        if (-not (Invoke-ConfigWizard)) {
-            return
-        }
+Write-Title "$($Config.Project.Name) Setup"
+
+# Run config wizard if needed
+if ($NeedsWizard) {
+    if (-not (Invoke-ConfigWizard)) {
+        return
     }
-
-    # Create directories
-    Create-Directories
-
-    # Ensure 7-Zip is available
-    Ensure-SevenZip
-
-    # Install all packages
-    foreach ($pkg in $AllPackages) {
-        try {
-            Process-Package $pkg
-        } catch {
-            Write-Err "Failed to process $($pkg.Name): $_"
-            Write-Info "Continuing with remaining packages..."
-        }
-    }
-
-    # Cleanup
-    Cleanup-Temp
-
-    # Generate Makefile if box-specific
-    if (Get-Command Setup-Makefile -ErrorAction SilentlyContinue) {
-        Setup-Makefile
-    }
-
-    # Generate env files
-    Generate-AllEnvFiles
-
-    Show-InstallComplete
 }
 
+# Create directories
+Create-Directories
+
+# Ensure 7-Zip is available
+Ensure-SevenZip
+
+# Install all packages
+foreach ($pkg in $AllPackages) {
+    try {
+        Invoke-Box-Pkg-Install -Item $pkg
+    } catch {
+        Write-Err "Failed to process $($pkg.Name): $_"
+        Write-Info "Continuing with remaining packages..."
+    }
+}
+
+# Cleanup
+Cleanup-Temp
+
+# Generate Makefile if box-specific
+if (Get-Command Setup-Makefile -ErrorAction SilentlyContinue) {
+    Setup-Makefile
+}
+
+# Generate env files
+Generate-AllEnvFiles
+
+Show-InstallComplete
+
+
+}
 # END modules/box/install.ps1
 # BEGIN modules/box/load.ps1
+function Invoke-Box-Load {
+    param([string[]]$Arguments)
 # ============================================================================
 # Box Load Module
 # ============================================================================
 #
 # Handles box load command - complete environment setup in one command
 
-function Invoke-Box-Load {
-    <#
-    .SYNOPSIS
-    Loads the complete Boxing environment in one command.
-
-    .DESCRIPTION
-    This command does everything needed to start working:
-    1. Updates .env file from packages
-    2. Updates VS Code settings
-    3. Loads .env variables into current PowerShell session
-    4. Adds .box/ and scripts/ to PATH
-
-    .EXAMPLE
-    box load
-    #>
-    param()
-
-    Write-Host ""
-    Write-Host "Loading Boxing environment..." -ForegroundColor Cyan
-    Write-Host ""
-
-    # 1. Generate .env file
-    Write-Step "Updating .env file"
-    Generate-AllEnvFiles
-    Write-Success ".env updated"
-
-    # 2. Update VS Code settings
-    Write-Step "Updating VS Code settings"
-    Update-VSCodeEnv
-    Write-Success "VS Code env updated"
-
-    # 3. Load .env into current session
-    Write-Step "Loading environment into session"
-    $envFile = Join-Path $BaseDir ".env"
-
-    if (-not (Test-Path $envFile)) {
-        Write-Err ".env file not found after update"
-        return
-    }
-
-    $loadedCount = 0
-    Get-Content $envFile | ForEach-Object {
-        if ($_ -match '^([^#=]+)=(.*)$') {
-            $key = $matches[1].Trim()
-            $value = $matches[2].Trim()
-            Set-Item "env:$key" $value
-            $loadedCount++
-        }
-    }
-    Write-Success "Loaded $loadedCount variables into session"
-
-    # 4. Add .box and scripts to PATH
-    Write-Step "Updating PATH"
-    $boxPath = Join-Path $BaseDir ".box"
-    $scriptsPath = Join-Path $BaseDir "scripts"
-    $env:PATH = "$boxPath;$scriptsPath;$env:PATH"
-    Write-Success "Added .box/ and scripts/ to PATH"
-
-    Write-Host ""
-    Write-Host "✓ Boxing environment ready!" -ForegroundColor Green
-    Write-Host ""
-}
-
-# END modules/box/load.ps1
-# BEGIN modules/box/pkg.ps1
-# ============================================================================
-# Package Management Dispatcher
-# ============================================================================
-#
-# Provides pkg subcommand dispatcher for direct package management CLI access.
-# Routes commands: install, list, validate, uninstall, state
-
-function Invoke-Box-Pkg {
-    <#
-    .SYNOPSIS
-    Package management dispatcher for box pkg subcommands.
-
-    .DESCRIPTION
-    Routes pkg subcommands to appropriate handlers:
-    - install: Install specific package by name
-    - list: Display all installed packages
-    - validate: Check package dependencies
-    - uninstall: Remove specific package
-    - state: Display package state from state.json
-    - (no subcommand): Display help
-
-    .PARAMETER Subcommand
-    Package action to perform (install, list, validate, uninstall, state)
-
-    .PARAMETER Args
-    Arguments to pass to the subcommand handler
-
-    .EXAMPLE
-    Invoke-Box-Pkg 'list'
-    Displays all installed packages
-
-    .EXAMPLE
-    Invoke-Box-Pkg 'install' @('NDK39')
-    Installs the NDK39 package
-    #>
-    param(
-        [Parameter(Position=0)]
-        [string]$Subcommand,
-
-        [Parameter(Position=1, ValueFromRemainingArguments=$true)]
-        [string[]]$Args
-    )
-
-    # No subcommand or empty string -> show help
-    if ([string]::IsNullOrWhiteSpace($Subcommand)) {
-        Show-PkgHelp
-        return
-    }
-
-    # Route to appropriate handler
-    switch ($Subcommand.ToLower()) {
-        'install' {
-            if ($Args.Count -eq 0) {
-                Write-Error "Package name required. Usage: box pkg install <name>"
-                return
-            }
-
-            # Find package definition in config
-            $packageName = $Args[0]
-            $package = $AllPackages | Where-Object { $_.Name -eq $packageName }
-
-            if (-not $package) {
-                Write-Error "Package '$packageName' not found in config.psd1"
-                Write-Host "Available packages:" -ForegroundColor Gray
-                foreach ($pkg in $AllPackages) {
-                    Write-Host "  - $($pkg.Name)" -ForegroundColor DarkGray
-                }
-                return
-            }
-
-            Process-Package -Item $package
-        }
-
-        'list' {
-            Show-PackageList
-        }
-
-        'validate' {
-            # Validate all packages
-            Write-Host ""
-            Write-Host "Validating package dependencies..." -ForegroundColor Cyan
-            Write-Host ""
-
-            $hasErrors = $false
-            foreach ($pkg in $AllPackages) {
-                try {
-                    $envs = Validate-PackageDependencies -Package $pkg
-                    Write-Host "  ✓ $($pkg.Name): Dependencies satisfied" -ForegroundColor Green
-                }
-                catch {
-                    Write-Host "  ✗ $($pkg.Name): $_" -ForegroundColor Red
-                    $hasErrors = $true
-                }
-            }
-
-            Write-Host ""
-            if ($hasErrors) {
-                Write-Host "Some packages have dependency issues" -ForegroundColor Yellow
-            } else {
-                Write-Host "All package dependencies validated successfully" -ForegroundColor Green
-            }
-        }
-
-        'uninstall' {
-            if ($Args.Count -eq 0) {
-                Write-Error "Package name required. Usage: box pkg uninstall <name>"
-                return
-            }
-
-            $packageName = $Args[0]
-            Remove-Package -Name $packageName
-        }
-
-        'state' {
-            Show-PackageState
-        }
-
-        default {
-            Write-Error "Unknown pkg subcommand: $Subcommand. Run 'box pkg' for help."
-            Show-PkgHelp
-        }
-    }
-}
-
-function Show-PkgHelp {
-    <#
-    .SYNOPSIS
-    Displays help text for pkg subcommands.
-
-    .DESCRIPTION
-    Shows available pkg subcommands with descriptions and usage examples.
-
-    .EXAMPLE
-    Show-PkgHelp
-    #>
-
-    Write-Host ""
-    Write-Host "Package Management Commands:" -ForegroundColor Cyan
-    Write-Host ""
-    Write-Host "  box pkg install <name>    " -NoNewline -ForegroundColor White
-    Write-Host "Install specific package" -ForegroundColor Gray
-
-    Write-Host "  box pkg list              " -NoNewline -ForegroundColor White
-    Write-Host "List installed packages" -ForegroundColor Gray
-
-    Write-Host "  box pkg validate          " -NoNewline -ForegroundColor White
-    Write-Host "Validate package dependencies" -ForegroundColor Gray
-
-    Write-Host "  box pkg uninstall <name>  " -NoNewline -ForegroundColor White
-    Write-Host "Remove package" -ForegroundColor Gray
-
-    Write-Host "  box pkg state             " -NoNewline -ForegroundColor White
-    Write-Host "Display package state" -ForegroundColor Gray
-
-    Write-Host ""
-    Write-Host "Examples:" -ForegroundColor Cyan
-    Write-Host "  box pkg install NDK39" -ForegroundColor DarkGray
-    Write-Host "  box pkg list" -ForegroundColor DarkGray
-    Write-Host "  box pkg state" -ForegroundColor DarkGray
-    Write-Host ""
-}
-
-# END modules/box/pkg.ps1
-# BEGIN modules/box/status.ps1
-# ============================================================================
-# Box Status Module
-# ============================================================================
-#
-# Handles box status command - showing project status
-
-function Invoke-Box-Status {
-    <#
-    .SYNOPSIS
-    Displays project status and configuration.
-
-    .EXAMPLE
-    box status
-    #>
-
-    Write-Host ""
-    Write-Host "Project Status" -ForegroundColor Cyan
-    Write-Host ("=" * 60) -ForegroundColor DarkGray
-    Write-Host ""
-
-    # Project info
-    if ($Config.Project) {
-        Write-Host "Project:" -ForegroundColor White
-        Write-Host ("  Name:        {0}" -f $Config.Project.Name) -ForegroundColor Gray
-        Write-Host ("  Description: {0}" -f $Config.Project.Description) -ForegroundColor Gray
-        Write-Host ("  Version:     {0}" -f $Config.Project.Version) -ForegroundColor Gray
-        Write-Host ""
-    }
-
-    # Packages status
-    $state = Load-State
-    $installedCount = 0
-    $manualCount = 0
-
-    if ($state.packages) {
-        foreach ($pkgName in $state.packages.Keys) {
-            $pkg = $state.packages[$pkgName]
-            if ($pkg.installed) {
-                $installedCount++
-            } else {
-                $manualCount++
-            }
-        }
-    }
-
-    Write-Host "Packages:" -ForegroundColor White
-    Write-Host ("  Installed:   {0}" -f $installedCount) -ForegroundColor Green
-    Write-Host ("  Manual:      {0}" -f $manualCount) -ForegroundColor Yellow
-    Write-Host ("  Total:       {0}" -f ($installedCount + $manualCount)) -ForegroundColor Gray
-    Write-Host ""
-
-    # Directories
-    Write-Host "Directories:" -ForegroundColor White
-    Write-Host ("  Base:        {0}" -f $BaseDir) -ForegroundColor Gray
-    Write-Host ("  Vendor:      {0}" -f $VendorDir) -ForegroundColor Gray
-    Write-Host ("  Temp:        {0}" -f $TempDir) -ForegroundColor Gray
-    Write-Host ""
-}
-
-# END modules/box/status.ps1
-# BEGIN modules/box/uninstall.ps1
-# ============================================================================
-# Box Uninstall Module
-# ============================================================================
-#
-# Handles box uninstall command - removing installed packages
-
-function Invoke-Box-Uninstall {
-    <#
-    .SYNOPSIS
-    Uninstalls all packages from the project.
-
-    .EXAMPLE
-    box uninstall
-    #>
-
-    Write-Title "Uninstall Environment"
-
-    # Check for custom uninstall script
-    $uninstallScript = Join-Path $BoxDir "uninstall.ps1"
-    if (Test-Path $uninstallScript) {
-        & $uninstallScript
-    } else {
-        # Default uninstall: remove all package files
-        $state = Load-State
-        if ($state.packages) {
-            foreach ($pkgName in $state.packages.Keys) {
-                Write-Step "Removing $pkgName"
-                Remove-Package -Name $pkgName
-            }
-        }
-
-        # Remove vendor directory
-        if (Test-Path $VendorDir) {
-            Remove-Item $VendorDir -Recurse -Force -ErrorAction SilentlyContinue
-            Write-Success "Removed vendor directory"
-        }
-
-        # Remove state file
-        if (Test-Path $StateFile) {
-            Remove-Item $StateFile -Force -ErrorAction SilentlyContinue
-            Write-Success "Removed state file"
-        }
-
-        Write-Success "Uninstall complete"
-    }
-}
-
-# END modules/box/uninstall.ps1
-# BEGIN modules/box/update.ps1
-# ============================================================================
-# Box Update Module
-# ============================================================================
-#
-# Updates .box/ directory by re-running irm|iex from source repo
-
-function Invoke-Box-Update {
-    <#
-    .SYNOPSIS
-    Updates .box/ to latest version from source
-
-    .DESCRIPTION
-    Reads .box/metadata.psd1 to find source repository,
-    then executes irm|iex which will update both global Boxing
-    and local .box/ if versions differ.
-
-    .EXAMPLE
-    box update
-    #>
-    param()
-
-    Write-Host ""
-    Write-Host "Updating box..." -ForegroundColor Cyan
-    Write-Host ""
-
-    # Verify we're in a box project
-    if (-not $script:BoxDir -or -not (Test-Path $script:BoxDir)) {
-        Write-Host "❌ Not in a box project" -ForegroundColor Red
-        Write-Host ""
-        Write-Host "Run 'boxer init' to create a new project" -ForegroundColor Gray
-        return 1
-    }
-
-    # Read metadata to get source repository
-    $metadataPath = Join-Path $script:BoxDir "metadata.psd1"
-    if (-not (Test-Path $metadataPath)) {
-        Write-Host "❌ metadata.psd1 not found in .box/" -ForegroundColor Red
-        return 1
-    }
-
-    try {
-        $metadata = Import-PowerShellDataFile -Path $metadataPath
-        $sourceRepo = $metadata.SourceRepo
-
-        if (-not $sourceRepo) {
-            Write-Host "❌ SourceRepo not defined in metadata.psd1" -ForegroundColor Red
-            return 1
-        }
-
-        $boxName = $metadata.BoxName
-        Write-Host "Box: $boxName" -ForegroundColor Gray
-        Write-Host "Source: $sourceRepo" -ForegroundColor Gray
-        Write-Host ""
-
-        # Construct download URL
-        $url = "https://raw.githubusercontent.com/$sourceRepo/main/box.ps1"
-
-        Write-Host "Downloading and executing update..." -ForegroundColor Cyan
-        Write-Host "  $url" -ForegroundColor Gray
-        Write-Host ""
-
-        # Execute irm|iex (will trigger Update-LocalBoxIfNeeded in Initialize-Boxing)
-        Invoke-RestMethod -Uri $url | Invoke-Expression
-
-        Write-Host ""
-        Write-Host "⚠ Restart your PowerShell session to use the updated box" -ForegroundColor Yellow
-
-    } catch {
-        Write-Host ""
-        Write-Host "❌ Update failed: $_" -ForegroundColor Red
-        return 1
-    }
-}
-
-# END modules/box/update.ps1
-# BEGIN modules/box/version.ps1
-# Box Version Command
-# Display box runtime version (simple output like boxer version)
-
-function Invoke-Box-Version {
 <#
 .SYNOPSIS
     AmiDevBox - Complete Amiga development environment setup system
-#>
-    $BoxVersion = if ($script:BoxerVersion) {
-        $script:BoxerVersion
-    } else {
-        "Unknown"
-    }
 
-    Write-Host "Box v$BoxVersion" -ForegroundColor Cyan
+.DESCRIPTION
+This command does everything needed to start working:
+1. Updates .env file from packages
+2. Updates VS Code settings
+3. Loads .env variables into current PowerShell session
+4. Adds .box/ and scripts/ to PATH
+
+.EXAMPLE
+box load
+#>
+
+Write-Host ""
+Write-Host "Loading Boxing environment..." -ForegroundColor Cyan
+Write-Host ""
+
+# 1. Generate .env file
+Write-Step "Updating .env file"
+Generate-AllEnvFiles
+Write-Success ".env updated"
+
+# 2. Update VS Code settings
+Write-Step "Updating VS Code settings"
+Update-VSCodeEnv
+Write-Success "VS Code env updated"
+
+# 3. Load .env into current session
+Write-Step "Loading environment into session"
+$envFile = Join-Path $BaseDir ".env"
+
+if (-not (Test-Path $envFile)) {
+    Write-Err ".env file not found after update"
+    return
 }
 
-# END modules/box/version.ps1
+$loadedCount = 0
+Get-Content $envFile | ForEach-Object {
+    if ($_ -match '^([^#=]+)=(.*)$') {
+        $key = $matches[1].Trim()
+        $value = $matches[2].Trim()
+        Set-Item "env:$key" $value
+        $loadedCount++
+    }
+}
+Write-Success "Loaded $loadedCount variables into session"
 
-# ============================================================================
-# EMBEDDED modules/shared/pkg/*.ps1 (pkg module)
-# ============================================================================
+# 4. Add .box and scripts to PATH
+Write-Step "Updating PATH"
+$boxPath = Join-Path $BaseDir ".box"
+$scriptsPath = Join-Path $BaseDir "scripts"
+$env:PATH = "$boxPath;$scriptsPath;$env:PATH"
+Write-Success "Added .box/ and scripts/ to PATH"
 
-# BEGIN modules/shared/pkg/dependencies.ps1
+Write-Host ""
+Write-Host "✓ Boxing environment ready!" -ForegroundColor Green
+Write-Host ""
+
+
+}
+# END modules/box/load.ps1
+# BEGIN modules/box/pkg.ps1
+function Invoke-Box-Pkg {
+    param([string[]]$Arguments)
+<#
+.SYNOPSIS
+    AmiDevBox - Complete Amiga development environment setup system
+
+.DESCRIPTION
+When 'box pkg' is called without subcommand, show package list.
+Subcommands (install, list, state, uninstall) are auto-routed.
+
+.NOTES
+Auto-routing handles: box pkg install, box pkg list, etc.
+This file handles: box pkg (no args) → list packages
+#>
+
+# If subcommand provided, route to it
+if ($Arguments -and $Arguments.Count -gt 0) {
+    $subcommand = $Arguments[0]
+    $subArgs = if ($Arguments.Count -gt 1) { $Arguments[1..($Arguments.Count - 1)] } else { @() }
+    Invoke-Handler -Module "pkg" -Handler $subcommand -Arguments $subArgs
+} else {
+    # No args: default to list
+    Invoke-Handler -Module "pkg" -Handler "list"
+}
+
+}
+# END modules/box/pkg.ps1
+# BEGIN modules/box/pkg\helpers\dependencies.ps1
+function Invoke-Box-Pkg-Helpers-Dependencies {
+    param([string[]]$Arguments)
 # ============================================================================
 # Package Dependency Validation Module
 # ============================================================================
@@ -4910,8 +4738,11 @@ function Validate-PackageDependencies {
     return $envPaths
 }
 
-# END modules/shared/pkg/dependencies.ps1
-# BEGIN modules/shared/pkg/detection.ps1
+}
+# END modules/box/pkg\helpers\dependencies.ps1
+# BEGIN modules/box/pkg\helpers\detection.ps1
+function Invoke-Box-Pkg-Helpers-Detection {
+    param([string[]]$Arguments)
 function Test-PackageInstalled {
     param([hashtable]$Package)
 
@@ -4928,373 +4759,604 @@ function Test-PackageInstalled {
     return @{ Installed = $false; Source = $null; Path = $null }
 }
 
-# END modules/shared/pkg/detection.ps1
-# BEGIN modules/shared/pkg/extraction.ps1
+}
+# END modules/box/pkg\helpers\detection.ps1
+# BEGIN modules/box/pkg\helpers\extraction.ps1
+function Invoke-Box-Pkg-Helpers-Extraction {
+    param([string[]]$Arguments)
 # Load core extract library if not embedded (embedded builds already have it)
 if (-not $script:IsEmbedded) {
-    $extractCore = Join-Path $PSScriptRoot '..\..\..\core\extract.ps1'
-    if (Test-Path $extractCore) {
-        . $extractCore
-    }
-    else {
-        throw "Missing core extract library at $extractCore"
+    # Check if Extract-Package function already exists (already loaded)
+    if (-not (Get-Command -Name Extract-Package -ErrorAction SilentlyContinue)) {
+        $extractCore = Join-Path $PSScriptRoot '..\..\..\core\extract.ps1'
+        if (Test-Path $extractCore) {
+            . $extractCore
+        }
+        else {
+            throw "Missing core extract library at $extractCore"
+        }
     }
 }
 
-# END modules/shared/pkg/extraction.ps1
-# BEGIN modules/shared/pkg/install.ps1
+}
+# END modules/box/pkg\helpers\extraction.ps1
+# BEGIN modules/box/pkg\install.ps1
+function Invoke-Box-Pkg-Install {
+    param([string[]]$Arguments)
 # ============================================================================
 # Package Installation Module
 # ============================================================================
 #
 # Main package installation logic with user interaction and state management.
 
-function Process-Package {
-    <#
-    .SYNOPSIS
-    Processes a package installation with user interaction.
+<#
+.SYNOPSIS
+    AmiDevBox - Complete Amiga development environment setup system
 
-    .DESCRIPTION
-    Handles the complete package installation workflow:
-    - Checks if package already installed (system/vendor/env)
-    - Prompts user for installation decisions
-    - Downloads and extracts package
-    - Updates package state
-    - Handles manual configuration if user refuses install
+.DESCRIPTION
+Handles the complete package installation workflow:
+- Checks if package already installed (system/vendor/env)
+- Prompts user for installation decisions
+- Downloads and extracts package
+- Updates package state
+- Handles manual configuration if user refuses install
 
-    .PARAMETER Item
-    Hashtable with package definition (Name, Url, File, Archive, Extract, Mode, etc.)
+.PARAMETER Item
+Hashtable with package definition (Name, Url, File, Archive, Extract, Mode, etc.)
 
-    .EXAMPLE
-    Process-Package -Item $packageDef
-    #>
-    param([hashtable]$Item)
+.EXAMPLE
+Invoke-Box-Pkg-Install -Item $packageDef
+#>
+param([hashtable]$Item)
 
-    $name = $Item.Name
-    $mode = if ($Item.Mode) { $Item.Mode } else { "auto" }
-    $pkgState = Get-PackageState $name
-    $isInstalled = $pkgState -and $pkgState.installed
-    $isManual = $pkgState -and -not $pkgState.installed
-    $existingEnvs = if ($pkgState -and $pkgState.envs) { $pkgState.envs } else { @{} }
+$name = $Item.Name
+$mode = if ($Item.Mode) { $Item.Mode } else { "auto" }
+$pkgState = Get-PackageState $name
+$isInstalled = $pkgState -and $pkgState.installed
+$isManual = $pkgState -and -not $pkgState.installed
+$existingEnvs = if ($pkgState -and $pkgState.envs) { $pkgState.envs } else { @{} }
 
-    Write-Step "$name - $($Item.Description)"
+Write-Step "$name - $($Item.Description)"
 
-    # Check if package already installed via system/vendor/env
-    $detection = Test-PackageInstalled -Package $Item
+# Check if package already installed via system/vendor/env
+$detection = Test-PackageInstalled -Package $Item
 
-    # Skip the "install anyway?" prompt for local installations (state/vendor source)
-    # Go directly to the "Local installation found" prompt instead
-    if ($detection.Installed -and $detection.Source -notin @("state", "vendor")) {
-        # Prompt user to use existing installation (global/system only)
-        $sourceLabel = if ($detection.Source -eq "env") { "global" } elseif ($detection.Source -eq "command") { "system" } else { $detection.Source }
-        Write-Info "Found $sourceLabel installation: $($detection.Path)"
-        $useExisting = Ask-Choice "Install locally in project anyway? [y/N]"
+# Skip the "install anyway?" prompt for local installations (state/vendor source)
+# Go directly to the "Local installation found" prompt instead
+if ($detection.Installed -and $detection.Source -notin @("state", "vendor")) {
+    # Prompt user to use existing installation (global/system only)
+    $sourceLabel = if ($detection.Source -eq "env") { "global" } elseif ($detection.Source -eq "command") { "system" } else { $detection.Source }
+    Write-Info "Found $sourceLabel installation: $($detection.Path)"
+    $useExisting = Ask-Choice "Install locally in project anyway? [y/N]"
 
-        if ($useExisting -ne "Y") {
-            Write-Success "Using $sourceLabel $name"
-            # Don't save any state - we're just using the existing installation
-            # The detection will find it again next time
-            return
-        }
-        # User chose to install anyway, continue below
-    }
-
-    # Already installed -> ask: Keep, Reinstall, Manual
-    if ($isInstalled) {
-        $choice = Ask-Choice "Local installation found. [K]eep / [R]einstall / [M]anual?"
-
-        switch ($choice) {
-            "K" {
-                Write-Info "Keeping existing local installation"
-                return
-            }
-            "R" {
-                Write-Info "Removing previous installation..."
-                Remove-Package $name
-                # Continue to install below
-            }
-            "M" {
-                $envs = Ask-ManualEnvs -ExtractRules $Item.Extract -ExistingEnvs $existingEnvs
-                Set-PackageState -Name $name -Installed $false -Files @() -Dirs @() -Envs $envs
-                Write-Success "Manual paths configured"
-                return
-            }
-        }
-    }
-    # Manual config exists -> ask: Skip, Install, Reconfigure
-    elseif ($isManual) {
-        $choice = Ask-Choice "$name has manual config. [S]kip / [I]nstall / [R]econfigure?"
-
-        switch ($choice) {
-            "S" {
-                Write-Info "Skipped"
-                return
-            }
-            "I" {
-                # Continue to install below
-            }
-            "R" {
-                $envs = Ask-ManualEnvs -ExtractRules $Item.Extract -ExistingEnvs $existingEnvs
-                Set-PackageState -Name $name -Installed $false -Files @() -Dirs @() -Envs $envs
-                Write-Success "Manual paths reconfigured"
-                return
-            }
-        }
-    }
-    # Not installed -> ask if mode=ask, otherwise auto-install
-    else {
-        if ($mode -eq "ask") {
-            $choice = Ask-Choice "Install? [Y/n]"
-
-            if ($choice -eq "N") {
-                # User refused install, validate dependencies
-                try {
-                    $envs = Validate-PackageDependencies -Package $Item
-                    Set-PackageState -Name $name -Installed $false -Files @() -Dirs @() -Envs $envs
-                    Write-Success "Manual paths configured"
-                } catch {
-                    Write-Err "Dependency validation failed: $_"
-                }
-                return
-            }
-        }
-        # mode=auto or user said Yes -> continue to install
-    }
-
-    # Detect SourceType
-    $sourceType = if ($Item.SourceType) { $Item.SourceType } else { "http" }
-
-    # Download and install
-    $archive = Download-File -Url $Item.Url -FileName $Item.File -SourceType $sourceType
-
-    if (-not $archive) {
-        Write-Err "Download failed for $name"
+    if ($useExisting -ne "Y") {
+        Write-Success "Using $sourceLabel $name"
+        # Don't save any state - we're just using the existing installation
+        # The detection will find it again next time
         return
     }
-
-    if ($Item.Archive -eq "file") {
-        $result = Install-SingleFile -FilePath $archive -Name $name -ExtractRules $Item.Extract
-    } else {
-        $result = Extract-Package -Archive $archive -Name $name -ArchiveType $Item.Archive -ExtractRules $Item.Extract
-    }
-
-    Set-PackageState -Name $name -Installed $true -Files $result.Files -Dirs $result.Dirs -Envs $result.Envs
-    Write-Success "Installed"
+    # User chose to install anyway, continue below
 }
 
-# END modules/shared/pkg/install.ps1
-# BEGIN modules/shared/pkg/list.ps1
+# Already installed -> ask: Keep, Reinstall, Manual
+if ($isInstalled) {
+    $choice = Ask-Choice "Local installation found. [K]eep / [R]einstall / [M]anual?"
+
+    switch ($choice) {
+        "K" {
+            Write-Info "Keeping existing local installation"
+            return
+        }
+        "R" {
+            Write-Info "Removing previous installation..."
+            Remove-Package $name
+            # Continue to install below
+        }
+        "M" {
+            $envs = Ask-ManualEnvs -ExtractRules $Item.Extract -ExistingEnvs $existingEnvs
+            Set-PackageState -Name $name -Installed $false -Files @() -Dirs @() -Envs $envs
+            Write-Success "Manual paths configured"
+            return
+        }
+    }
+}
+# Manual config exists -> ask: Skip, Install, Reconfigure
+elseif ($isManual) {
+    $choice = Ask-Choice "$name has manual config. [S]kip / [I]nstall / [R]econfigure?"
+
+    switch ($choice) {
+        "S" {
+            Write-Info "Skipped"
+            return
+        }
+        "I" {
+            # Continue to install below
+        }
+        "R" {
+            $envs = Ask-ManualEnvs -ExtractRules $Item.Extract -ExistingEnvs $existingEnvs
+            Set-PackageState -Name $name -Installed $false -Files @() -Dirs @() -Envs $envs
+            Write-Success "Manual paths reconfigured"
+            return
+        }
+    }
+}
+# Not installed -> ask if mode=ask, otherwise auto-install
+else {
+    if ($mode -eq "ask") {
+        $choice = Ask-Choice "Install? [Y/n]"
+
+        if ($choice -eq "N") {
+            # User refused install, validate dependencies
+            try {
+                $envs = Validate-PackageDependencies -Package $Item
+                Set-PackageState -Name $name -Installed $false -Files @() -Dirs @() -Envs $envs
+                Write-Success "Manual paths configured"
+            } catch {
+                Write-Err "Dependency validation failed: $_"
+            }
+            return
+        }
+    }
+    # mode=auto or user said Yes -> continue to install
+}
+
+# Detect SourceType
+$sourceType = if ($Item.SourceType) { $Item.SourceType } else { "http" }
+
+# Download and install
+$archive = Download-File -Url $Item.Url -FileName $Item.File -SourceType $sourceType
+
+if (-not $archive) {
+    Write-Err "Download failed for $name"
+    return
+}
+
+if ($Item.Archive -eq "file") {
+    $result = Install-SingleFile -FilePath $archive -Name $name -ExtractRules $Item.Extract
+} else {
+    $result = Extract-Package -Archive $archive -Name $name -ArchiveType $Item.Archive -ExtractRules $Item.Extract
+}
+
+Set-PackageState -Name $name -Installed $true -Files $result.Files -Dirs $result.Dirs -Envs $result.Envs
+Write-Success "Installed"
+
+}
+# END modules/box/pkg\install.ps1
+# BEGIN modules/box/pkg\list.ps1
+function Invoke-Box-Pkg-List {
+    param([string[]]$Arguments)
 # ============================================================================
 # Package List Module
 # ============================================================================
 #
 # Functions for displaying package information.
 
-function Show-PackageList {
-    <#
-    .SYNOPSIS
-    Displays a formatted list of all packages with their status.
+<#
+.SYNOPSIS
+    AmiDevBox - Complete Amiga development environment setup system
 
-    .DESCRIPTION
-    Shows a table with package names, environment variables, descriptions,
-    and installation status with visual indicators.
+.DESCRIPTION
+Shows a table with package names, environment variables, descriptions,
+and installation status with visual indicators.
 
-    .EXAMPLE
-    Show-PackageList
-    #>
-    Write-Host ""
-    Write-Host "Packages:" -ForegroundColor Cyan
-    Write-Host ""
+.EXAMPLE
+Invoke-Box-Pkg-List
+#>
+param()
 
-    $state = Load-State
+Write-Host ""
+Write-Host "Packages:" -ForegroundColor Cyan
+Write-Host ""
 
-    # Table columns
-    $colName = 20
-    $colEnv = 18
-    $colValue = 35
-    $colStatus = 9
+$state = Load-State
 
-    Write-Host ("  {0,-$colName} {1,-$colEnv} {2,-$colValue} {3}" -f "NAME", "ENV VARS", "DESCRIPTION", "INSTALLED") -ForegroundColor DarkGray
-    Write-Host ("  {0,-$colName} {1,-$colEnv} {2,-$colValue} {3}" -f ("-" * $colName), ("-" * $colEnv), ("-" * $colValue), ("-" * $colStatus)) -ForegroundColor DarkGray
+# Table columns
+$colName = 20
+$colEnv = 18
+$colValue = 35
+$colStatus = 9
 
-    foreach ($item in $AllPackages) {
-        $name = $item.Name
-        $pkgState = if ($state.packages.ContainsKey($name)) { $state.packages[$name] } else { $null }
+Write-Host ("  {0,-$colName} {1,-$colEnv} {2,-$colValue} {3}" -f "NAME", "ENV VARS", "DESCRIPTION", "INSTALLED") -ForegroundColor DarkGray
+Write-Host ("  {0,-$colName} {1,-$colEnv} {2,-$colValue} {3}" -f ("-" * $colName), ("-" * $colEnv), ("-" * $colValue), ("-" * $colStatus)) -ForegroundColor DarkGray
 
-        # Get ENV vars (from state if installed, from rules if not)
-        $envVars = @{}
-        if ($pkgState -and $pkgState.envs) {
-            $envVars = $pkgState.envs
-        } elseif ($item.Extract) {
-            foreach ($rule in $item.Extract) {
-                $parsed = Parse-ExtractRule $rule
-                if ($parsed -and $parsed.EnvVar) {
-                    $envVars[$parsed.EnvVar] = $null
-                }
+foreach ($item in $AllPackages) {
+    $name = $item.Name
+    $pkgState = if ($state.packages.ContainsKey($name)) { $state.packages[$name] } else { $null }
+
+    # Get ENV vars (from state if installed, from rules if not)
+    $envVars = @{}
+    if ($pkgState -and $pkgState.envs) {
+        $envVars = $pkgState.envs
+    } elseif ($item.Extract) {
+        foreach ($rule in $item.Extract) {
+            $parsed = Parse-ExtractRule $rule
+            if ($parsed -and $parsed.EnvVar) {
+                $envVars[$parsed.EnvVar] = $null
             }
-        }
-
-        # Status indicator (last column)
-        $isInstalled = $pkgState -and $pkgState.installed
-        $isManual = $pkgState -and -not $pkgState.installed
-        $hasEnvVars = $envVars.Count -gt 0
-        $statusMark = if ($isInstalled) { [char]0x1F60A } elseif ($isManual) { [char]0x1F4E6 } else { "" }
-        $statusColor = if ($isInstalled) { "Green" } elseif ($isManual) { "Yellow" } else { "DarkGray" }
-
-        # First line: package name + first ENV or description
-        $firstEnv = $envVars.Keys | Select-Object -First 1
-
-        Write-Host ("  {0,-$colName}" -f $name) -ForegroundColor White -NoNewline
-
-        if ($firstEnv) {
-            $firstValue = if ($envVars[$firstEnv]) { $envVars[$firstEnv] } else { $item.Description }
-            $valueColor = if ($envVars[$firstEnv]) { "Gray" } else { "DarkGray" }
-            Write-Host (" {0,-$colEnv}" -f $firstEnv) -ForegroundColor Cyan -NoNewline
-            Write-Host (" {0,-$colValue}" -f $firstValue) -ForegroundColor $valueColor -NoNewline
-        } else {
-            Write-Host (" {0,-$colEnv} {1,-$colValue}" -f "", $item.Description) -ForegroundColor DarkGray -NoNewline
-        }
-        Write-Host $statusMark -ForegroundColor $statusColor
-
-        # Additional ENV vars (skip first)
-        $remaining = $envVars.Keys | Select-Object -Skip 1
-        foreach ($envName in $remaining) {
-            $envValue = if ($envVars[$envName]) { $envVars[$envName] } else { $item.Description }
-            $valueColor = if ($envVars[$envName]) { "Gray" } else { "DarkGray" }
-
-            Write-Host ("  {0,-$colName}" -f "") -NoNewline
-            Write-Host (" {0,-$colEnv}" -f $envName) -ForegroundColor Cyan -NoNewline
-            Write-Host (" {0,-$colValue}" -f $envValue) -ForegroundColor $valueColor
         }
     }
 
-    Write-Host ""
+    # Status indicator (last column)
+    $isInstalled = $pkgState -and $pkgState.installed
+    $isManual = $pkgState -and -not $pkgState.installed
+    $hasEnvVars = $envVars.Count -gt 0
+    $statusMark = if ($isInstalled) { [char]0x1F60A } elseif ($isManual) { [char]0x1F4E6 } else { "" }
+    $statusColor = if ($isInstalled) { "Green" } elseif ($isManual) { "Yellow" } else { "DarkGray" }
+
+    # First line: package name + first ENV or description
+    $firstEnv = $envVars.Keys | Select-Object -First 1
+
+    Write-Host ("  {0,-$colName}" -f $name) -ForegroundColor White -NoNewline
+
+    if ($firstEnv) {
+        $firstValue = if ($envVars[$firstEnv]) { $envVars[$firstEnv] } else { $item.Description }
+        $valueColor = if ($envVars[$firstEnv]) { "Gray" } else { "DarkGray" }
+        Write-Host (" {0,-$colEnv}" -f $firstEnv) -ForegroundColor Cyan -NoNewline
+        Write-Host (" {0,-$colValue}" -f $firstValue) -ForegroundColor $valueColor -NoNewline
+    } else {
+        Write-Host (" {0,-$colEnv} {1,-$colValue}" -f "", $item.Description) -ForegroundColor DarkGray -NoNewline
+    }
+    Write-Host $statusMark -ForegroundColor $statusColor
+
+    # Additional ENV vars (skip first)
+    $remaining = $envVars.Keys | Select-Object -Skip 1
+    foreach ($envName in $remaining) {
+        $envValue = if ($envVars[$envName]) { $envVars[$envName] } else { $item.Description }
+        $valueColor = if ($envVars[$envName]) { "Gray" } else { "DarkGray" }
+
+        Write-Host ("  {0,-$colName}" -f "") -NoNewline
+        Write-Host (" {0,-$colEnv}" -f $envName) -ForegroundColor Cyan -NoNewline
+        Write-Host (" {0,-$colValue}" -f $envValue) -ForegroundColor $valueColor
+    }
 }
 
-# END modules/shared/pkg/list.ps1
-# BEGIN modules/shared/pkg/state.ps1
+Write-Host ""
+
+}
+# END modules/box/pkg\list.ps1
+# BEGIN modules/box/pkg\state.ps1
+function Invoke-Box-Pkg-State {
+    param([string[]]$Arguments)
 # ============================================================================
 # Package State Display Module
 # ============================================================================
 #
 # Functions for displaying package state information from .box/state.json.
 
-function Show-PackageState {
-    <#
-    .SYNOPSIS
-    Displays the current package state from .box/state.json.
+<#
+.SYNOPSIS
+    AmiDevBox - Complete Amiga development environment setup system
 
-    .DESCRIPTION
-    Shows the raw package state for debugging purposes, including:
-    - Installation status
-    - Installed files and directories
-    - Environment variable configurations
-    - Installation timestamps
+.DESCRIPTION
+Shows the raw package state for debugging purposes, including:
+- Installation status
+- Installed files and directories
+- Environment variable configurations
+- Installation timestamps
 
-    .EXAMPLE
-    Show-PackageState
-    #>
+.EXAMPLE
+Invoke-Box-Pkg-State
+#>
+param()
 
-    $statePath = Join-Path $ProjectRoot ".box\state.json"
+$statePath = Join-Path $ProjectRoot ".box\state.json"
 
-    if (-not (Test-Path $statePath)) {
-        Write-Host ""
-        Write-Host "No package state file found (.box/state.json)" -ForegroundColor Yellow
-        Write-Host "Run 'box install' to initialize package state" -ForegroundColor Gray
+if (-not (Test-Path $statePath)) {
+    Write-Host ""
+    Write-Host "No package state file found (.box/state.json)" -ForegroundColor Yellow
+    Write-Host "Run 'box install' to initialize package state" -ForegroundColor Gray
+    Write-Host ""
+    return
+}
+
+try {
+    $state = Get-Content $statePath -Raw | ConvertFrom-Json
+
+    Write-Host ""
+    Write-Host "Package State (.box/state.json):" -ForegroundColor Cyan
+    Write-Host ""
+
+    if (-not $state.packages -or $state.packages.PSObject.Properties.Count -eq 0) {
+        Write-Host "  No packages installed" -ForegroundColor Gray
         Write-Host ""
         return
     }
 
-    try {
-        $state = Get-Content $statePath -Raw | ConvertFrom-Json
+    foreach ($pkgName in $state.packages.PSObject.Properties.Name) {
+        $pkg = $state.packages.$pkgName
 
-        Write-Host ""
-        Write-Host "Package State (.box/state.json):" -ForegroundColor Cyan
-        Write-Host ""
-
-        if (-not $state.packages -or $state.packages.PSObject.Properties.Count -eq 0) {
-            Write-Host "  No packages installed" -ForegroundColor Gray
-            Write-Host ""
-            return
+        Write-Host "  $pkgName" -ForegroundColor White
+        Write-Host "    Installed: $($pkg.installed)" -ForegroundColor $(if ($pkg.installed) { "Green" } else { "Yellow" })
+        if ($pkg.files -and $pkg.files.Count -gt 0) {
+            Write-Host "    Files: $($pkg.files.Count) file(s)" -ForegroundColor Gray
         }
 
-        foreach ($pkgName in $state.packages.PSObject.Properties.Name) {
-            $pkg = $state.packages.$pkgName
-
-            Write-Host "  $pkgName" -ForegroundColor White
-            Write-Host "    Installed: $($pkg.installed)" -ForegroundColor $(if ($pkg.installed) { "Green" } else { "Yellow" })
-
-            if ($pkg.files -and $pkg.files.Count -gt 0) {
-                Write-Host "    Files: $($pkg.files.Count) file(s)" -ForegroundColor Gray
-            }
-
-            if ($pkg.dirs -and $pkg.dirs.Count -gt 0) {
-                Write-Host "    Directories: $($pkg.dirs.Count) dir(s)" -ForegroundColor Gray
-            }
-
-            if ($pkg.envs -and $pkg.envs.PSObject.Properties.Count -gt 0) {
-                Write-Host "    Environment Variables:" -ForegroundColor Gray
-                foreach ($envName in $pkg.envs.PSObject.Properties.Name) {
-                    $envValue = $pkg.envs.$envName
-                    Write-Host "      $envName = $envValue" -ForegroundColor DarkGray
-                }
-            }
-
-            Write-Host ""
+        if ($pkg.dirs -and $pkg.dirs.Count -gt 0) {
+            Write-Host "    Directories: $($pkg.dirs.Count) dir(s)" -ForegroundColor Gray
         }
-    }
-    catch {
-        Write-Error "Failed to read package state: $_"
+
+        if ($pkg.envs -and $pkg.envs.PSObject.Properties.Count -gt 0) {
+            Write-Host "    Environment Variables:" -ForegroundColor Gray
+            foreach ($envName in $pkg.envs.PSObject.Properties.Name) {
+                $envValue = $pkg.envs.$envName
+                Write-Host "      $envName = $envValue" -ForegroundColor DarkGray
+            }
+        }
+
+        Write-Host ""
     }
 }
+catch {
+    Write-Error "Failed to read package state: $_"
+}
 
-# END modules/shared/pkg/state.ps1
-# BEGIN modules/shared/pkg/uninstall.ps1
+}
+# END modules/box/pkg\state.ps1
+# BEGIN modules/box/pkg\uninstall.ps1
+function Invoke-Box-Pkg-Uninstall {
+    param([string[]]$Arguments)
 # ============================================================================
 # Package Uninstallation Module
 # ============================================================================
 #
 # Functions for removing installed packages.
 
-function Remove-Package {
-    <#
-    .SYNOPSIS
-    Removes an installed package.
+<#
+.SYNOPSIS
+    AmiDevBox - Complete Amiga development environment setup system
 
-    .DESCRIPTION
-    Deletes all files and directories installed by the package,
-    then removes the package state.
+.DESCRIPTION
+Deletes all files and directories installed by the package,
+then removes the package state.
 
-    .PARAMETER Name
-    The package name
+.PARAMETER Name
+The package name
 
-    .EXAMPLE
-    Remove-Package -Name "vbcc"
-    #>
-    param([string]$Name)
+.EXAMPLE
+Invoke-Box-Pkg-Uninstall -Name "vbcc"
+#>
+param([string]$Name)
 
-    $pkgState = Get-PackageState $Name
-    if (-not $pkgState) {
-        Write-Warn "Package $Name not found in state"
-        return
+$pkgState = Get-PackageState $Name
+if (-not $pkgState) {
+    Write-Warn "Package $Name not found in state"
+    return
+}
+
+if ($pkgState.installed -and $pkgState.files) {
+    Write-Info "Removing $($pkgState.files.Count) files and $($pkgState.dirs.Count) directories..."  
+
+    foreach ($file in $pkgState.files) {
+        if (Test-Path $file) {
+            Remove-Item $file -Recurse -Force -ErrorAction SilentlyContinue
+            Write-Info "Removed: $file"
+        }
     }
+}
 
-    if ($pkgState.installed -and $pkgState.files) {
-        Write-Info "Removing $($pkgState.files.Count) files and $($pkgState.dirs.Count) directories..."
+Remove-PackageState $Name
+Write-Success "Package $Name removed"
 
-        foreach ($file in $pkgState.files) {
-            if (Test-Path $file) {
-                Remove-Item $file -Recurse -Force -ErrorAction SilentlyContinue
-                Write-Info "Removed: $file"
-            }
+}
+# END modules/box/pkg\uninstall.ps1
+# BEGIN modules/box/status.ps1
+function Invoke-Box-Status {
+    param([string[]]$Arguments)
+# ============================================================================
+# Box Status Module
+# ============================================================================
+#
+# Handles box status command - showing project status
+
+<#
+.SYNOPSIS
+    AmiDevBox - Complete Amiga development environment setup system
+
+.DESCRIPTION
+Shows current project status including:
+- Project metadata (name, description, version)
+- Package installation statistics (installed, manual, total)
+- Directory structure and paths
+- Configuration summary
+
+.EXAMPLE
+box status
+Displays complete project status
+#>
+
+Write-Host ""
+Write-Host "Project Status" -ForegroundColor Cyan
+Write-Host ("=" * 60) -ForegroundColor DarkGray
+Write-Host ""
+
+# Project info
+if ($Config.Project) {
+    Write-Host "Project:" -ForegroundColor White
+    Write-Host ("  Name:        {0}" -f $Config.Project.Name) -ForegroundColor Gray
+    Write-Host ("  Description: {0}" -f $Config.Project.Description) -ForegroundColor Gray
+    Write-Host ("  Version:     {0}" -f $Config.Project.Version) -ForegroundColor Gray
+    Write-Host ""
+}
+
+# Packages status
+$state = Load-State
+$installedCount = 0
+$manualCount = 0
+
+if ($state.packages) {
+    foreach ($pkgName in $state.packages.Keys) {
+        $pkg = $state.packages[$pkgName]
+        if ($pkg.installed) {
+            $installedCount++
+        } else {
+            $manualCount++
+        }
+    }
+}
+
+Write-Host "Packages:" -ForegroundColor White
+Write-Host ("  Installed:   {0}" -f $installedCount) -ForegroundColor Green
+Write-Host ("  Manual:      {0}" -f $manualCount) -ForegroundColor Yellow
+Write-Host ("  Total:       {0}" -f ($installedCount + $manualCount)) -ForegroundColor Gray
+Write-Host ""
+
+# Directories
+Write-Host "Directories:" -ForegroundColor White
+Write-Host ("  Base:        {0}" -f $BaseDir) -ForegroundColor Gray
+Write-Host ("  Vendor:      {0}" -f $VendorDir) -ForegroundColor Gray
+Write-Host ("  Temp:        {0}" -f $TempDir) -ForegroundColor Gray
+Write-Host ""
+
+
+}
+# END modules/box/status.ps1
+# BEGIN modules/box/uninstall.ps1
+function Invoke-Box-Uninstall {
+    param([string[]]$Arguments)
+# ============================================================================
+# Box Uninstall Module
+# ============================================================================
+#
+# Handles box uninstall command - removing installed packages
+
+<#
+.SYNOPSIS
+    AmiDevBox - Complete Amiga development environment setup system
+
+.EXAMPLE
+box uninstall
+#>
+
+Write-Title "Uninstall Environment"
+
+# Check for custom uninstall script
+$uninstallScript = Join-Path $BoxDir "uninstall.ps1"
+if (Test-Path $uninstallScript) {
+    & $uninstallScript
+} else {
+    # Default uninstall: remove all package files
+    $state = Load-State
+    if ($state.packages) {
+        foreach ($pkgName in $state.packages.Keys) {
+            Write-Step "Removing $pkgName"
+            Remove-Package -Name $pkgName
         }
     }
 
-    Remove-PackageState $Name
-    Write-Success "Package $Name removed"
+    # Remove vendor directory
+    if (Test-Path $VendorDir) {
+        Remove-Item $VendorDir -Recurse -Force -ErrorAction SilentlyContinue
+        Write-Success "Removed vendor directory"
+    }
+
+    # Remove state file
+    if (Test-Path $StateFile) {
+        Remove-Item $StateFile -Force -ErrorAction SilentlyContinue
+        Write-Success "Removed state file"
+    }
+
+    Write-Success "Uninstall complete"
 }
 
-# END modules/shared/pkg/uninstall.ps1
+
+}
+# END modules/box/uninstall.ps1
+# BEGIN modules/box/update.ps1
+function Invoke-Box-Update {
+    param([string[]]$Arguments)
+# ============================================================================
+# Box Update Module
+# ============================================================================
+#
+# Updates .box/ directory by re-running irm|iex from source repo
+
+<#
+.SYNOPSIS
+    AmiDevBox - Complete Amiga development environment setup system
+
+.DESCRIPTION
+Reads .box/metadata.psd1 to find source repository,
+then executes irm|iex which will update both global Boxing
+and local .box/ if versions differ.
+
+.EXAMPLE
+box update
+#>
+param()
+
+Write-Host ""
+Write-Host "Updating box..." -ForegroundColor Cyan
+Write-Host ""
+
+# Verify we're in a box project
+if (-not $script:BoxDir -or -not (Test-Path $script:BoxDir)) {
+    Write-Host "❌ Not in a box project" -ForegroundColor Red
+    Write-Host ""
+    Write-Host "Run 'boxer init' to create a new project" -ForegroundColor Gray
+    return 1
+}
+
+# Read metadata to get source repository
+$metadataPath = Join-Path $script:BoxDir "metadata.psd1"
+if (-not (Test-Path $metadataPath)) {
+    Write-Host "❌ metadata.psd1 not found in .box/" -ForegroundColor Red
+    return 1
+}
+
+try {
+    $metadata = Import-PowerShellDataFile -Path $metadataPath
+    $sourceRepo = $metadata.SourceRepo
+
+    if (-not $sourceRepo) {
+        Write-Host "❌ SourceRepo not defined in metadata.psd1" -ForegroundColor Red
+        return 1
+    }
+
+    $boxName = $metadata.BoxName
+        Write-Host "Box: $boxName" -ForegroundColor Gray
+    Write-Host "Source: $sourceRepo" -ForegroundColor Gray
+    Write-Host ""
+
+    # Construct download URL
+    $url = "https://raw.githubusercontent.com/$sourceRepo/main/box.ps1"
+
+    Write-Host "Downloading and executing update..." -ForegroundColor Cyan
+    Write-Host "  $url" -ForegroundColor Gray
+    Write-Host ""
+
+    # Execute irm|iex (will trigger Update-LocalBoxIfNeeded in Initialize-Boxing)
+    Invoke-RestMethod -Uri $url | Invoke-Expression
+
+    Write-Host ""
+    Write-Host "⚠ Restart your PowerShell session to use the updated box" -ForegroundColor Yellow
+
+} catch {
+    Write-Host ""
+    Write-Host "❌ Update failed: $_" -ForegroundColor Red
+    return 1
+}
+
+}
+# END modules/box/update.ps1
+# BEGIN modules/box/version.ps1
+function Invoke-Box-Version {
+    param([string[]]$Arguments)
+# Box Version Command
+# Display box runtime version (simple output like boxer version)
+
+<#
+.SYNOPSIS
+    AmiDevBox - Complete Amiga development environment setup system
+#>
+param()
+
+$BoxVersion = Get-BoxerVersion
+if (-not $BoxVersion) { $BoxVersion = "Unknown" }
+
+Write-Host "Box v$BoxVersion" -ForegroundColor Cyan
+
+}
+# END modules/box/version.ps1
 
 # ============================================================================
 # MAIN - Call Initialize-Boxing (Spec 010 architecture)
