@@ -7,8 +7,8 @@
     Standalone boxer.ps1 with embedded core libraries and modules
 
 .NOTES
-    Build Date: 2026-01-19 20:31:29
-    Version: 0.1.183
+    Build Date: 2026-01-19 21:36:46
+    Version: 0.1.184
     Build Type: Embedded
 #>
 
@@ -25,7 +25,7 @@ $ErrorActionPreference = 'Stop'
 $script:BoxingRoot = if ($PSScriptRoot) { $PSScriptRoot } else { $env:TEMP }
 $script:Mode = 'boxer'
 $script:IsEmbedded = $true
-$script:BoxerVersion = "0.1.183"
+$script:BoxerVersion = "0.1.184"
 $script:LoadedModules = @{}
 $script:Commands = @{}
 $script:CommandRegistry = @{}
@@ -2698,19 +2698,27 @@ function Get-InstalledBoxes {
 # BEGIN modules/boxer/install.ps1
 function Invoke-Boxer-Install {
 # ============================================================================
-# Boxer Install Command Dispatcher
+# Boxer Install Command
 # ============================================================================
 
 <#
 .SYNOPSIS
-Boxer install command dispatcher.
+Install a Box from registry or GitHub.
+
+.DESCRIPTION
+Downloads and installs a Box type from GitHub repository.
+Can install from registry name (AmiDevBox) or direct GitHub URL.
 
 .PARAMETER Arguments
-Command arguments (box name or GitHub URL).
+Box name from registry or GitHub repository URL.
 
 .EXAMPLE
 boxer install AmiDevBox
+Install AmiDevBox from registry
+
+.EXAMPLE
 boxer install https://github.com/vbuzzano/AmiDevBox
+Install directly from GitHub URL
 #>
 param(
     [Parameter(ValueFromRemainingArguments=$true)]
@@ -3005,21 +3013,21 @@ function Get-RemoteBoxVersion {
 # BEGIN modules/boxer/list.ps1
 function Invoke-Boxer-List {
 # ============================================================================
-# Boxer List Module
+# Boxer List Command
 # ============================================================================
-#
-# Handles boxer list command - listing installed boxes from user installation directory
 
 <#
 .SYNOPSIS
-Lists all installed Box types from ~/Documents/PowerShell/Boxing/Boxes/.
+List all installed Box types.
 
 .DESCRIPTION
-Displays boxes that are actually installed on the user's system,
+Displays all Boxes installed in ~/Documents/PowerShell/Boxing/Boxes/.
+Shows boxes actually installed on the user's system,
 not development boxes in the repository.
 
 .EXAMPLE
 boxer list
+Show all installed boxes with version and description
 #>
 
 Write-Host ""
@@ -3094,25 +3102,29 @@ Write-Host ""
 # END modules/boxer/list.ps1
 # BEGIN modules/boxer/update.ps1
 function Invoke-Boxer-Update {
+# ============================================================================
 # Boxer Update Command
-# Updates a box project's .box/ directory
+# ============================================================================
 
 <#
 .SYNOPSIS
-Updates a box project to the latest version
+Update a Box project to latest version.
 
 .DESCRIPTION
 Navigates to the specified project directory (or current directory)
-and executes 'box update' which triggers irm|iex from the box's source repo.
+and executes 'box update' which updates the .box/ directory
+from the box's source repository.
 
 .PARAMETER Path
 Path to the box project directory. Defaults to current directory.
 
 .EXAMPLE
 boxer update
+Update Box project in current directory
 
 .EXAMPLE
 boxer update C:\Projects\MyProject
+Update specific project at given path
 #>
 param(
     [Parameter(Position=0)]
@@ -3163,20 +3175,21 @@ try {
 # END modules/boxer/update.ps1
 # BEGIN modules/boxer/version.ps1
 function Invoke-Boxer-Version {
+# ============================================================================
 # Boxer Version Command
-# Display version information for boxer and installed boxes
+# ============================================================================
 
 <#
 .SYNOPSIS
-    Display boxer version information
+Display Boxer version information.
 
 .DESCRIPTION
-    Shows the current version of the Boxer system.
-    Version is embedded in the boxer.ps1 script during build.
+Shows the current version of the Boxer system.
+Version is embedded in the boxer.ps1 script during build.
 
 .EXAMPLE
-    boxer version
-    Displays: Boxer v2.1.0
+boxer version
+Displays: Boxer v2.1.0
 #>
 
 $BoxerVersion = Get-BoxerVersion

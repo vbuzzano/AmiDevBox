@@ -8,7 +8,7 @@
 
 .NOTES
     Build Date: 2026-01-19
-    Version: 0.1.109
+    Version: 0.1.110
     Build Type: Embedded
 #>
 
@@ -46,7 +46,7 @@ while ($true) {
 $script:BoxingRoot = $BaseDir
 $script:Mode = 'box'
 $script:IsEmbedded = $true
-$script:BoxerVersion = "0.1.109"
+$script:BoxerVersion = "0.1.110"
 $script:LoadedModules = @{}
 $script:Commands = @{}
 $script:CommandRegistry = @{}
@@ -3315,7 +3315,7 @@ function Ensure-SevenZip {
 
 .NOTES
     Module: templates.ps1
-    Version: 0.1.109
+    Version: 0.1.110
 #>
 
 # ============================================================================
@@ -4521,17 +4521,20 @@ function Invoke-ConfigWizard {
 function Invoke-Box-Clean {
     param([string[]]$Arguments)
 # ============================================================================
-# Box Clean Module
+# Box Clean Command
 # ============================================================================
-#
-# Handles box clean command - cleaning build artifacts
 
 <#
 .SYNOPSIS
     AmiDevBox - Complete Amiga development environment setup system
 
+.DESCRIPTION
+Removes build directories (build/, dist/, out/, bin/, obj/)
+and temporary files (*.tmp, *.log) from the project.
+
 .EXAMPLE
 box clean
+Remove all build artifacts and temporary files
 #>
 
 Write-Title "Cleaning Build Artifacts"
@@ -4560,23 +4563,40 @@ Write-Success "Clean complete"
 function Invoke-Box-Env-Env {
     param([string[]]$Arguments)
 # ============================================================================
-# Box Env Module - Main Dispatcher
+# Box Env Command (Dispatcher)
 # ============================================================================
-#
-# Handles box env command with subcommands (list, load, replace, update)
 
 <#
 .SYNOPSIS
     AmiDevBox - Complete Amiga development environment setup system
 
+.DESCRIPTION
+Manages environment variables for the project.
+Subcommands: list, load, replace, update.
+Default action when called without subcommand is 'list'.
+
 .PARAMETER Sub
-Subcommand to execute: list, load, replace, update
+Subcommand to execute (list, load, replace, update).
+
+.EXAMPLE
+box env
+List all environment variables (default)
 
 .EXAMPLE
 box env list
+Explicitly list environment variables
+
+.EXAMPLE
 box env load
-box env replace KEY=VALUE
+Load .env into current PowerShell session
+
+.EXAMPLE
+box env replace *.md -Force
+Replace tagged values in Markdown files
+
+.EXAMPLE
 box env update
+Regenerate .env from installed packages
 #>
 
 param(
@@ -4616,16 +4636,24 @@ switch ($Sub.ToLower()) {
 function Invoke-Box-Env-List {
     param([string[]]$Arguments)
 # ============================================================================
-# Box Env Module - List subcommand
+# Box Env List Subcommand
 # ============================================================================
 
 <#
 .SYNOPSIS
     AmiDevBox - Complete Amiga development environment setup system
 
+.DESCRIPTION
+Lists environment variables defined by all installed packages.
+Shows package name and associated environment variables.
+
 .EXAMPLE
 box env list
+Display all configured environment variables
+
+.EXAMPLE
 box env
+Same as 'box env list' (default behavior)
 #>
 param()
 
@@ -4657,7 +4685,7 @@ Write-Host ""
 function Invoke-Box-Env-Load {
     param([string[]]$Arguments)
 # ============================================================================
-# Box Env Module - Load subcommand
+# Box Env Load Subcommand
 # ============================================================================
 
 <#
@@ -4665,11 +4693,17 @@ function Invoke-Box-Env-Load {
     AmiDevBox - Complete Amiga development environment setup system
 
 .DESCRIPTION
-Reads .env file and sets all variables as environment variables in the
-current PowerShell session. Also adds .box/ and scripts/ to PATH.
+Reads .env file and sets all variables as environment variables
+in the current PowerShell session. Also adds .box/ and scripts/
+to PATH for immediate access to tools.
 
 .EXAMPLE
 box env load
+Load environment variables into current session
+
+.NOTES
+This only affects the current PowerShell session.
+For permanent changes, use 'box env update' and restart terminal.
 #>
 param()
 
@@ -4704,7 +4738,7 @@ Write-Info "Added to PATH: .box/, scripts/"
 function Invoke-Box-Env-Replace {
     param([string[]]$Arguments)
 # ============================================================================
-# Box Env Module - Replace subcommand
+# Box Env Replace Subcommand
 # ============================================================================
 
 <#
@@ -4716,15 +4750,16 @@ Processes files and replaces tagged values with current environment
 variable values. Supports in-place updates (preserves tags) or
 release mode (strips tags).
 
-Syntaxes supported:
-- ~value[VAR_NAME]~ : Universal tag
-- Box-specific syntaxes via hooks (e.g., #define for C)
+Supported tag syntaxes:
+- ~value[VAR_NAME]~ : Universal tag format
+- Box-specific syntaxes via hooks (e.g., #define for C files)
 
 .PARAMETER Path
-Path pattern to files to process (e.g., *.md, src/, README.md)
+Path pattern to files to process (*.md, src/, README.md, etc.).
 
 .PARAMETER OutputDir
-If specified, copies processed files to this directory with tags stripped.
+Optional output directory for processed files.
+If specified, copies files with tags stripped (release mode).
 If not specified, updates files in-place preserving tags.
 
 .PARAMETER Force
@@ -4732,11 +4767,15 @@ Required for in-place updates to prevent accidental overwrites.
 
 .EXAMPLE
 box env replace *.md -Force
-Updates all Markdown files in-place
+Update all Markdown files in-place with current env values
 
 .EXAMPLE
 box env replace . -OutputDir dist/ -Force
-Copies all files to dist/ with tags stripped (release mode)
+Copy all files to dist/ with tags replaced and stripped
+
+.EXAMPLE
+box env replace README.md -Force
+Update single file in-place
 #>
 param(
     [Parameter(Position = 0, Mandatory = $true)]
@@ -4785,7 +4824,7 @@ if ($releaseMode) {
 function Invoke-Box-Env-Update {
     param([string[]]$Arguments)
 # ============================================================================
-# Box Env Module - Update subcommand
+# Box Env Update Subcommand
 # ============================================================================
 
 <#
@@ -4797,8 +4836,20 @@ Regenerates .env file from all installed package configurations,
 updates VS Code terminal environment variables, and updates
 tagged files throughout the project.
 
+This command should be run after:
+- Installing new packages
+- Changing package configurations
+- Updating package versions
+
 .EXAMPLE
 box env update
+Regenerate environment files from package state
+
+.NOTES
+Automatically updates:
+- .env file with all package environment variables
+- .vscode/settings.json terminal environment
+- Tagged files in project (calls Update-TaggedFiles)
 #>
 param()
 
@@ -4881,23 +4932,24 @@ function Update-VSCodeEnv {
 # BEGIN modules/box/info.ps1
 function Invoke-Box-Info {
     param([string[]]$Arguments)
+# ============================================================================
 # Box Info Command
-# Display detailed information for current box workspace
+# ============================================================================
 
 <#
 .SYNOPSIS
     AmiDevBox - Complete Amiga development environment setup system
 
 .DESCRIPTION
-    Shows comprehensive information about the current Box workspace including:
-    - Box runtime version
-    - Box metadata (name, version, type, author, tags)
-    - Build date and core version
-    - Workspace configuration
+Shows comprehensive information about the current Box workspace including:
+- Box runtime version
+- Box metadata (name, version, type, author, tags)
+- Build date and core version
+- Workspace configuration
 
 .EXAMPLE
-    box info
-    Displays all workspace information
+box info
+Display all workspace information
 #>
 
 Write-Host ""
@@ -4973,10 +5025,8 @@ if ($script:BaseDir) {
 function Invoke-Box-Install {
     param([string[]]$Arguments)
 # ============================================================================
-# Box Install Module
+# Box Install Command
 # ============================================================================
-#
-# Handles box install command - installing packages in a project
 
 <#
 .SYNOPSIS
@@ -4993,7 +5043,7 @@ Executes the complete installation workflow for a Box project:
 
 .EXAMPLE
 box install
-Installs all packages defined in config.box
+Install all packages defined in configuration
 #>
 
 Write-Title "$($Config.Project.Name) Setup"
@@ -5041,17 +5091,15 @@ Show-InstallComplete
 function Invoke-Box-Load {
     param([string[]]$Arguments)
 # ============================================================================
-# Box Load Module
+# Box Load Command
 # ============================================================================
-#
-# Handles box load command - complete environment setup in one command
 
 <#
 .SYNOPSIS
     AmiDevBox - Complete Amiga development environment setup system
 
 .DESCRIPTION
-This command does everything needed to start working:
+Sets up the complete environment in one command:
 1. Updates .env file from packages
 2. Updates VS Code settings
 3. Loads .env variables into current PowerShell session
@@ -5059,6 +5107,7 @@ This command does everything needed to start working:
 
 .EXAMPLE
 box load
+Load full environment for current project
 #>
 
 Write-Host ""
@@ -5117,11 +5166,27 @@ function Invoke-Box-Pkg {
     AmiDevBox - Complete Amiga development environment setup system
 
 .DESCRIPTION
-When 'box pkg' is called without subcommand, show package list.
+Package management command dispatcher.
+When 'box pkg' is called without subcommand, shows package list.
 Subcommands (install, list, state, uninstall) are auto-routed.
 
+.PARAMETER Arguments
+Subcommand and its arguments.
+
+.EXAMPLE
+box pkg
+List all packages (default behavior)
+
+.EXAMPLE
+box pkg install vbcc
+Install vbcc package
+
+.EXAMPLE
+box pkg list
+Explicitly list packages
+
 .NOTES
-Auto-routing handles: box pkg install, box pkg list, etc.
+Auto-routing handles: box pkg install, box pkg list, box pkg state, box pkg uninstall
 This file handles: box pkg (no args) → list packages
 #>
 
@@ -5272,28 +5337,37 @@ if (-not $script:IsEmbedded) {
 function Invoke-Box-Pkg-Install {
     param([string[]]$Arguments)
 # ============================================================================
-# Package Installation Module
+# Box Pkg Install Subcommand
 # ============================================================================
-#
-# Main package installation logic with user interaction and state management.
 
 <#
 .SYNOPSIS
     AmiDevBox - Complete Amiga development environment setup system
 
 .DESCRIPTION
-Handles the complete package installation workflow:
+Handles complete package installation workflow:
 - Checks if package already installed (system/vendor/env)
 - Prompts user for installation decisions
-- Downloads and extracts package
-- Updates package state
+- Downloads and extracts package files
+- Updates package state and environment
 - Handles manual configuration if user refuses install
 
 .PARAMETER Item
-Hashtable with package definition (Name, Url, File, Archive, Extract, Mode, etc.)
+Hashtable with package definition containing:
+- Name: Package name
+- Url: Download URL
+- File: Target filename
+- Archive: Archive type (zip, lha, tar.gz)
+- Extract: Extraction rules
+- Mode: Installation mode (auto/manual)
 
 .EXAMPLE
-Invoke-Box-Pkg-Install -Item $packageDef
+box pkg install vbcc
+Install vbcc package with user prompts
+
+.NOTES
+Internal function called by Invoke-Box-Install for each package.
+Handles detection of existing installations and user prompts.
 #>
 param([hashtable]$Item)
 
@@ -5414,21 +5488,33 @@ Write-Success "Installed"
 function Invoke-Box-Pkg-List {
     param([string[]]$Arguments)
 # ============================================================================
-# Package List Module
+# Box Pkg List Subcommand
 # ============================================================================
-#
-# Functions for displaying package information.
 
 <#
 .SYNOPSIS
     AmiDevBox - Complete Amiga development environment setup system
 
 .DESCRIPTION
-Shows a table with package names, environment variables, descriptions,
-and installation status with visual indicators.
+Shows table with package information:
+- Package names
+- Environment variables configured
+- Package descriptions
+- Installation status with visual indicators
 
 .EXAMPLE
-Invoke-Box-Pkg-List
+box pkg list
+Display all packages and their status
+
+.EXAMPLE
+box pkg
+Same as 'box pkg list' (default behavior)
+
+.NOTES
+Status indicators:
+- ✓ : Installed from package definition
+- ⚙ : Manually configured (user-provided paths)
+- ✗ : Not installed
 #>
 param()
 
@@ -5506,24 +5592,27 @@ Write-Host ""
 function Invoke-Box-Pkg-State {
     param([string[]]$Arguments)
 # ============================================================================
-# Package State Display Module
+# Box Pkg State Subcommand
 # ============================================================================
-#
-# Functions for displaying package state information from .box/state.json.
 
 <#
 .SYNOPSIS
     AmiDevBox - Complete Amiga development environment setup system
 
 .DESCRIPTION
-Shows the raw package state for debugging purposes, including:
-- Installation status
+Shows raw package state for debugging purposes:
+- Installation status for each package
 - Installed files and directories
 - Environment variable configurations
-- Installation timestamps
+- Installation timestamps and metadata
 
 .EXAMPLE
-Invoke-Box-Pkg-State
+box pkg state
+Display detailed state of all packages
+
+.NOTES
+Useful for debugging package issues and verifying installations.
+Shows the internal state file (.box/state.json) in human-readable format.
 #>
 param()
 
@@ -5584,24 +5673,29 @@ catch {
 function Invoke-Box-Pkg-Uninstall {
     param([string[]]$Arguments)
 # ============================================================================
-# Package Uninstallation Module
+# Box Pkg Uninstall Subcommand
 # ============================================================================
-#
-# Functions for removing installed packages.
 
 <#
 .SYNOPSIS
     AmiDevBox - Complete Amiga development environment setup system
 
 .DESCRIPTION
-Deletes all files and directories installed by the package,
-then removes the package state.
+Uninstalls a package by:
+- Deleting all installed files and directories
+- Removing package from state file
+- Cleaning up environment variable configurations
 
 .PARAMETER Name
-The package name
+The package name to uninstall.
 
 .EXAMPLE
-Invoke-Box-Pkg-Uninstall -Name "vbcc"
+box pkg uninstall vbcc
+Remove vbcc package and all its files
+
+.NOTES
+Only removes files tracked in package state.
+Manually added files are not affected.
 #>
 param([string]$Name)
 
@@ -5612,7 +5706,7 @@ if (-not $pkgState) {
 }
 
 if ($pkgState.installed -and $pkgState.files) {
-    Write-Info "Removing $($pkgState.files.Count) files and $($pkgState.dirs.Count) directories..."  
+    Write-Info "Removing $($pkgState.files.Count) files and $($pkgState.dirs.Count) directories..."
 
     foreach ($file in $pkgState.files) {
         if (Test-Path $file) {
@@ -5631,10 +5725,8 @@ Write-Success "Package $Name removed"
 function Invoke-Box-Status {
     param([string[]]$Arguments)
 # ============================================================================
-# Box Status Module
+# Box Status Command
 # ============================================================================
-#
-# Handles box status command - showing project status
 
 <#
 .SYNOPSIS
@@ -5649,7 +5741,7 @@ Shows current project status including:
 
 .EXAMPLE
 box status
-Displays complete project status
+Display complete project status
 #>
 
 Write-Host ""
@@ -5702,17 +5794,23 @@ Write-Host ""
 function Invoke-Box-Uninstall {
     param([string[]]$Arguments)
 # ============================================================================
-# Box Uninstall Module
+# Box Uninstall Command
 # ============================================================================
-#
-# Handles box uninstall command - removing installed packages
 
 <#
 .SYNOPSIS
     AmiDevBox - Complete Amiga development environment setup system
 
+.DESCRIPTION
+Removes all installed packages and cleans up:
+- Removes package files from vendor directory
+- Cleans up package state
+- Removes vendor directory
+- Deletes state file
+
 .EXAMPLE
 box uninstall
+Remove all packages and clean up project
 #>
 
 Write-Title "Uninstall Environment"
@@ -5753,10 +5851,8 @@ if (Test-Path $uninstallScript) {
 function Invoke-Box-Update {
     param([string[]]$Arguments)
 # ============================================================================
-# Box Update Module
+# Box Update Command
 # ============================================================================
-#
-# Updates .box/ directory by re-running irm|iex from source repo
 
 <#
 .SYNOPSIS
@@ -5764,11 +5860,12 @@ function Invoke-Box-Update {
 
 .DESCRIPTION
 Reads .box/metadata.psd1 to find source repository,
-then executes irm|iex which will update both global Boxing
-and local .box/ if versions differ.
+then downloads and updates box.ps1 and related files
+from the source GitHub repository.
 
 .EXAMPLE
 box update
+Update current Box project to latest version
 #>
 param()
 
@@ -5829,12 +5926,21 @@ try {
 # BEGIN modules/box/version.ps1
 function Invoke-Box-Version {
     param([string[]]$Arguments)
+# ============================================================================
 # Box Version Command
-# Display box runtime version (simple output like boxer version)
+# ============================================================================
 
 <#
 .SYNOPSIS
     AmiDevBox - Complete Amiga development environment setup system
+
+.DESCRIPTION
+Shows the current version of the Box runtime.
+Version is embedded in box.ps1 during build.
+
+.EXAMPLE
+box version
+Displays: Box v2.1.0
 #>
 param()
 
