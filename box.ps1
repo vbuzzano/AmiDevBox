@@ -8,7 +8,7 @@
 
 .NOTES
     Build Date: 2026-01-19
-    Version: 0.1.103
+    Version: 0.1.104
     Build Type: Embedded
 #>
 
@@ -46,7 +46,7 @@ while ($true) {
 $script:BoxingRoot = $BaseDir
 $script:Mode = 'box'
 $script:IsEmbedded = $true
-$script:BoxerVersion = "0.1.103"
+$script:BoxerVersion = "0.1.104"
 $script:LoadedModules = @{}
 $script:Commands = @{}
 $script:CommandRegistry = @{}
@@ -69,7 +69,15 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 # Global variables
-if (-not $script:BoxingRoot) { $script:BoxingRoot = Split-Path -Parent $PSScriptRoot }
+# Handle irm|iex context where $PSScriptRoot is empty
+if (-not $script:BoxingRoot) {
+    if ($PSScriptRoot) {
+        $script:BoxingRoot = Split-Path -Parent $PSScriptRoot
+    } else {
+        # irm|iex context - use temp location or current directory
+        $script:BoxingRoot = $env:TEMP
+    }
+}
 if (-not $script:Mode) { $script:Mode = $null }
 if (-not $script:LoadedModules) { $script:LoadedModules = @{} }
 if (-not $script:Commands) { $script:Commands = @{} }
@@ -2827,7 +2835,7 @@ function Ensure-SevenZip {
 
 .NOTES
     Module: templates.ps1
-    Version: 0.1.103
+    Version: 0.1.104
 #>
 
 # ============================================================================
@@ -5372,6 +5380,6 @@ if ($Arguments) {
 }
 
 # Call main bootstrapper with all arguments
-Initialize-Boxing -Arguments $allArgs
+Initialize-Boxing -Arguments $allArgs | Out-Null
 
 

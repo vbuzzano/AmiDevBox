@@ -7,8 +7,8 @@
     Standalone boxer.ps1 with embedded core libraries and modules
 
 .NOTES
-    Build Date: 2026-01-19 05:33:40
-    Version: 0.1.161
+    Build Date: 2026-01-19 05:49:28
+    Version: 0.1.164
     Build Type: Embedded
 #>
 
@@ -21,10 +21,11 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 # Global variables
-$script:BoxingRoot = $PSScriptRoot
+# Handle irm|iex context where $PSScriptRoot is empty
+$script:BoxingRoot = if ($PSScriptRoot) { $PSScriptRoot } else { $env:TEMP }
 $script:Mode = 'boxer'
 $script:IsEmbedded = $true
-$script:BoxerVersion = "0.1.161"
+$script:BoxerVersion = "0.1.164"
 $script:LoadedModules = @{}
 $script:Commands = @{}
 $script:CommandRegistry = @{}
@@ -47,7 +48,15 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 # Global variables
-if (-not $script:BoxingRoot) { $script:BoxingRoot = Split-Path -Parent $PSScriptRoot }
+# Handle irm|iex context where $PSScriptRoot is empty
+if (-not $script:BoxingRoot) {
+    if ($PSScriptRoot) {
+        $script:BoxingRoot = Split-Path -Parent $PSScriptRoot
+    } else {
+        # irm|iex context - use temp location or current directory
+        $script:BoxingRoot = $env:TEMP
+    }
+}
 if (-not $script:Mode) { $script:Mode = $null }
 if (-not $script:LoadedModules) { $script:LoadedModules = @{} }
 if (-not $script:Commands) { $script:Commands = @{} }
@@ -3234,5 +3243,5 @@ Write-Host "Boxer v$BoxerVersion" -ForegroundColor Cyan
 
 # Ensure Arguments is an array (can be null in irm|iex context)
 if (-not $Arguments) { $Arguments = @() }
-Initialize-Boxing -Arguments $Arguments
+Initialize-Boxing -Arguments $Arguments | Out-Null
 
