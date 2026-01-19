@@ -7,8 +7,8 @@
     Standalone boxer.ps1 with embedded core libraries and modules
 
 .NOTES
-    Build Date: 2026-01-19 05:49:28
-    Version: 0.1.164
+    Build Date: 2026-01-19 06:16:51
+    Version: 0.1.166
     Build Type: Embedded
 #>
 
@@ -25,7 +25,7 @@ $ErrorActionPreference = 'Stop'
 $script:BoxingRoot = if ($PSScriptRoot) { $PSScriptRoot } else { $env:TEMP }
 $script:Mode = 'boxer'
 $script:IsEmbedded = $true
-$script:BoxerVersion = "0.1.164"
+$script:BoxerVersion = "0.1.166"
 $script:LoadedModules = @{}
 $script:Commands = @{}
 $script:CommandRegistry = @{}
@@ -3243,5 +3243,5 @@ Write-Host "Boxer v$BoxerVersion" -ForegroundColor Cyan
 
 # Ensure Arguments is an array (can be null in irm|iex context)
 if (-not $Arguments) { $Arguments = @() }
-Initialize-Boxing -Arguments $Arguments | Out-Null
+Initialize-Boxing -Arguments $Arguments
 

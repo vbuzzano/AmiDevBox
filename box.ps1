@@ -8,7 +8,7 @@
 
 .NOTES
     Build Date: 2026-01-19
-    Version: 0.1.104
+    Version: 0.1.105
     Build Type: Embedded
 #>
 
@@ -46,7 +46,7 @@ while ($true) {
 $script:BoxingRoot = $BaseDir
 $script:Mode = 'box'
 $script:IsEmbedded = $true
-$script:BoxerVersion = "0.1.104"
+$script:BoxerVersion = "0.1.105"
 $script:LoadedModules = @{}
 $script:Commands = @{}
 $script:CommandRegistry = @{}
@@ -2835,7 +2835,7 @@ function Ensure-SevenZip {
 
 .NOTES
     Module: templates.ps1
-    Version: 0.1.104
+    Version: 0.1.105
 #>
 
 # ============================================================================
@@ -5380,6 +5380,6 @@ if ($Arguments) {
 }
 
 # Call main bootstrapper with all arguments
-Initialize-Boxing -Arguments $allArgs | Out-Null
+Initialize-Boxing -Arguments $allArgs
 
 
