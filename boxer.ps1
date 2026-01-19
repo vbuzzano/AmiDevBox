@@ -7,8 +7,8 @@
     Standalone boxer.ps1 with embedded core libraries and modules
 
 .NOTES
-    Build Date: 2026-01-19 06:16:51
-    Version: 0.1.166
+    Build Date: 2026-01-19 06:23:59
+    Version: 0.1.168
     Build Type: Embedded
 #>
 
@@ -25,10 +25,11 @@ $ErrorActionPreference = 'Stop'
 $script:BoxingRoot = if ($PSScriptRoot) { $PSScriptRoot } else { $env:TEMP }
 $script:Mode = 'boxer'
 $script:IsEmbedded = $true
-$script:BoxerVersion = "0.1.166"
+$script:BoxerVersion = "0.1.168"
 $script:LoadedModules = @{}
 $script:Commands = @{}
 $script:CommandRegistry = @{}
+$script:IsIrmIexContext = -not $PSScriptRoot  # Flag for irm|iex detection
 
 
 # ============================================================================
@@ -136,8 +137,11 @@ function Initialize-Boxing {
     )
 
     try {
-        # Auto-installation/update if executed via irm|iex (no $PSScriptRoot)
-        if (-not $PSScriptRoot -and $Arguments.Count -eq 0) {
+        # Auto-installation/update if executed via irm|iex
+        # Check: no PSScriptRoot OR explicit IsIrmIexContext flag (set in embedded builds)
+        $isIrmIex = (-not $PSScriptRoot) -or (Get-Variable -Name IsIrmIexContext -Scope Script -ValueOnly -ErrorAction SilentlyContinue)
+        
+        if ($isIrmIex -and $Arguments.Count -eq 0) {
             $BoxerInstalled = "$env:USERPROFILE\Documents\PowerShell\Boxing\boxer.ps1"
 
             # 1. Check if already installed

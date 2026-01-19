@@ -8,7 +8,7 @@
 
 .NOTES
     Build Date: 2026-01-19
-    Version: 0.1.105
+    Version: 0.1.106
     Build Type: Embedded
 #>
 
@@ -46,7 +46,7 @@ while ($true) {
 $script:BoxingRoot = $BaseDir
 $script:Mode = 'box'
 $script:IsEmbedded = $true
-$script:BoxerVersion = "0.1.105"
+$script:BoxerVersion = "0.1.106"
 $script:LoadedModules = @{}
 $script:Commands = @{}
 $script:CommandRegistry = @{}
@@ -157,8 +157,11 @@ function Initialize-Boxing {
     )
 
     try {
-        # Auto-installation/update if executed via irm|iex (no $PSScriptRoot)
-        if (-not $PSScriptRoot -and $Arguments.Count -eq 0) {
+        # Auto-installation/update if executed via irm|iex
+        # Check: no PSScriptRoot OR explicit IsIrmIexContext flag (set in embedded builds)
+        $isIrmIex = (-not $PSScriptRoot) -or (Get-Variable -Name IsIrmIexContext -Scope Script -ValueOnly -ErrorAction SilentlyContinue)
+        
+        if ($isIrmIex -and $Arguments.Count -eq 0) {
             $BoxerInstalled = "$env:USERPROFILE\Documents\PowerShell\Boxing\boxer.ps1"
 
             # 1. Check if already installed
@@ -2835,7 +2838,7 @@ function Ensure-SevenZip {
 
 .NOTES
     Module: templates.ps1
-    Version: 0.1.105
+    Version: 0.1.106
 #>
 
 # ============================================================================
