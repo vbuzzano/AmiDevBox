@@ -7,8 +7,8 @@
     Standalone boxer.ps1 with embedded core libraries and modules
 
 .NOTES
-    Build Date: 2026-01-19 06:23:59
-    Version: 0.1.168
+    Build Date: 2026-01-19 06:28:24
+    Version: 0.1.171
     Build Type: Embedded
 #>
 
@@ -25,7 +25,7 @@ $ErrorActionPreference = 'Stop'
 $script:BoxingRoot = if ($PSScriptRoot) { $PSScriptRoot } else { $env:TEMP }
 $script:Mode = 'boxer'
 $script:IsEmbedded = $true
-$script:BoxerVersion = "0.1.168"
+$script:BoxerVersion = "0.1.171"
 $script:LoadedModules = @{}
 $script:Commands = @{}
 $script:CommandRegistry = @{}
@@ -158,7 +158,7 @@ function Initialize-Boxing {
                     if ($InstalledVersion -and $CurrentVersion -and ([version]$CurrentVersion -gt [version]$InstalledVersion)) {
                         Write-Host ""
                         Write-Host "🔄 Boxer update: $InstalledVersion → $CurrentVersion" -ForegroundColor Cyan
-                        Install-BoxingSystem | Out-Null
+                        Install-BoxingSystem
 
                         # Check if we're in a project directory with .box
                         Update-LocalBoxIfNeeded
@@ -167,7 +167,7 @@ function Initialize-Boxing {
                         # Already up-to-date or newer installed
                         Write-Host "✓ Boxer already up-to-date (v$InstalledVersion)" -ForegroundColor Green
                         # Check if box needs update (Install-BoxingSystem handles this)
-                        Install-BoxingSystem | Out-Null
+                        Install-BoxingSystem
 
                         # Check if we're in a project directory with .box
                         Update-LocalBoxIfNeeded
@@ -178,7 +178,7 @@ function Initialize-Boxing {
                 }
             } else {
                 # First-time installation
-                Install-BoxingSystem | Out-Null
+                Install-BoxingSystem
                 return
             }
         }
@@ -3247,5 +3247,10 @@ Write-Host "Boxer v$BoxerVersion" -ForegroundColor Cyan
 
 # Ensure Arguments is an array (can be null in irm|iex context)
 if (-not $Arguments) { $Arguments = @() }
-Initialize-Boxing -Arguments $Arguments
+$result = Initialize-Boxing -Arguments $Arguments
+
+# Exit cleanly after installation (don't show help)
+if ($script:IsIrmIexContext -and $Arguments.Count -eq 0) {
+    exit 0
+}
 

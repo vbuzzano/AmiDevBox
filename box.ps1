@@ -8,7 +8,7 @@
 
 .NOTES
     Build Date: 2026-01-19
-    Version: 0.1.106
+    Version: 0.1.107
     Build Type: Embedded
 #>
 
@@ -46,7 +46,7 @@ while ($true) {
 $script:BoxingRoot = $BaseDir
 $script:Mode = 'box'
 $script:IsEmbedded = $true
-$script:BoxerVersion = "0.1.106"
+$script:BoxerVersion = "0.1.107"
 $script:LoadedModules = @{}
 $script:Commands = @{}
 $script:CommandRegistry = @{}
@@ -178,7 +178,7 @@ function Initialize-Boxing {
                     if ($InstalledVersion -and $CurrentVersion -and ([version]$CurrentVersion -gt [version]$InstalledVersion)) {
                         Write-Host ""
                         Write-Host "🔄 Boxer update: $InstalledVersion → $CurrentVersion" -ForegroundColor Cyan
-                        Install-BoxingSystem | Out-Null
+                        Install-BoxingSystem
 
                         # Check if we're in a project directory with .box
                         Update-LocalBoxIfNeeded
@@ -187,7 +187,7 @@ function Initialize-Boxing {
                         # Already up-to-date or newer installed
                         Write-Host "✓ Boxer already up-to-date (v$InstalledVersion)" -ForegroundColor Green
                         # Check if box needs update (Install-BoxingSystem handles this)
-                        Install-BoxingSystem | Out-Null
+                        Install-BoxingSystem
 
                         # Check if we're in a project directory with .box
                         Update-LocalBoxIfNeeded
@@ -198,7 +198,7 @@ function Initialize-Boxing {
                 }
             } else {
                 # First-time installation
-                Install-BoxingSystem | Out-Null
+                Install-BoxingSystem
                 return
             }
         }
@@ -2838,7 +2838,7 @@ function Ensure-SevenZip {
 
 .NOTES
     Module: templates.ps1
-    Version: 0.1.106
+    Version: 0.1.107
 #>
 
 # ============================================================================
