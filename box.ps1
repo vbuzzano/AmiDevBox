@@ -8,7 +8,7 @@
 
 .NOTES
     Build Date: 2026-01-19
-    Version: 0.1.108
+    Version: 0.1.109
     Build Type: Embedded
 #>
 
@@ -46,7 +46,7 @@ while ($true) {
 $script:BoxingRoot = $BaseDir
 $script:Mode = 'box'
 $script:IsEmbedded = $true
-$script:BoxerVersion = "0.1.108"
+$script:BoxerVersion = "0.1.109"
 $script:LoadedModules = @{}
 $script:Commands = @{}
 $script:CommandRegistry = @{}
@@ -3315,7 +3315,7 @@ function Ensure-SevenZip {
 
 .NOTES
     Module: templates.ps1
-    Version: 0.1.108
+    Version: 0.1.109
 #>
 
 # ============================================================================
