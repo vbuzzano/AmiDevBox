@@ -8,7 +8,7 @@
 
 .NOTES
     Build Date: 2026-01-19
-    Version: 0.1.110
+    Version: 0.1.111
     Build Type: Embedded
 #>
 
@@ -46,7 +46,7 @@ while ($true) {
 $script:BoxingRoot = $BaseDir
 $script:Mode = 'box'
 $script:IsEmbedded = $true
-$script:BoxerVersion = "0.1.110"
+$script:BoxerVersion = "0.1.111"
 $script:LoadedModules = @{}
 $script:Commands = @{}
 $script:CommandRegistry = @{}
@@ -3315,7 +3315,7 @@ function Ensure-SevenZip {
 
 .NOTES
     Module: templates.ps1
-    Version: 0.1.110
+    Version: 0.1.111
 #>
 
 # ============================================================================
@@ -4655,7 +4655,6 @@ Display all configured environment variables
 box env
 Same as 'box env list' (default behavior)
 #>
-param()
 
 Write-Host ""
 Write-Host "Environment Variables:" -ForegroundColor Cyan
@@ -4705,7 +4704,6 @@ Load environment variables into current session
 This only affects the current PowerShell session.
 For permanent changes, use 'box env update' and restart terminal.
 #>
-param()
 
 $envFile = Join-Path $BaseDir ".env"
 
@@ -4851,7 +4849,6 @@ Automatically updates:
 - .vscode/settings.json terminal environment
 - Tagged files in project (calls Update-TaggedFiles)
 #>
-param()
 
 Generate-AllEnvFiles
 Update-VSCodeEnv
@@ -5516,7 +5513,6 @@ Status indicators:
 - ⚙ : Manually configured (user-provided paths)
 - ✗ : Not installed
 #>
-param()
 
 Write-Host ""
 Write-Host "Packages:" -ForegroundColor Cyan
@@ -5614,7 +5610,6 @@ Display detailed state of all packages
 Useful for debugging package issues and verifying installations.
 Shows the internal state file (.box/state.json) in human-readable format.
 #>
-param()
 
 $statePath = Join-Path $ProjectRoot ".box\state.json"
 
@@ -5867,7 +5862,6 @@ from the source GitHub repository.
 box update
 Update current Box project to latest version
 #>
-param()
 
 Write-Host ""
 Write-Host "Updating box..." -ForegroundColor Cyan
@@ -5942,7 +5936,6 @@ Version is embedded in box.ps1 during build.
 box version
 Displays: Box v2.1.0
 #>
-param()
 
 $BoxVersion = Get-BoxerVersion
 if (-not $BoxVersion) { $BoxVersion = "Unknown" }
