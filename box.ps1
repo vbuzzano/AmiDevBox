@@ -8,7 +8,7 @@
 
 .NOTES
     Build Date: 2026-01-20
-    Version: 0.1.115
+    Version: 0.1.112
     Build Type: Embedded
 #>
 
@@ -46,7 +46,7 @@ while ($true) {
 $script:BoxingRoot = $BaseDir
 $script:Mode = 'box'
 $script:IsEmbedded = $true
-$script:BoxerVersion = "0.1.115"
+$script:BoxerVersion = "0.1.112"
 $script:LoadedModules = @{}
 $script:Commands = @{}
 $script:CommandRegistry = @{}
@@ -1010,11 +1010,41 @@ function Register-ExternalDirectoryModule {
             'metadata' { continue }
             'help' { $helpHandler = $file.FullName; continue }
             {$name -eq $ModuleName.ToLower()} { $defaultHandler = $file.FullName; continue }
-            default { $subcommands[$name] = $file.FullName }
+            default {
+                # Extract help metadata for subcommands
+                $helpInfo = Get-Help $file.FullName -ErrorAction SilentlyContinue
+                $synopsis = if ($helpInfo -and $helpInfo.Synopsis -and $helpInfo.Synopsis -ne $file.FullName) {
+                    $helpInfo.Synopsis
+                } else { $null }
+                $description = if ($helpInfo -and ($helpInfo.PSObject.Properties.Name -contains 'Description') -and $helpInfo.Description -and $helpInfo.Description.Text) {
+                    $helpInfo.Description.Text
+                } else { $null }
+
+                # Store as hashtable with metadata
+                $subcommands[$name] = @{
+                    Handler = @{ Type = 'script'; Path = $file.FullName }
+                    Synopsis = $synopsis
+                    Description = $description
+                }
+            }
         }
     }
 
     if ($script:CommandRegistry.ContainsKey($ModuleName.ToLower())) { return }
+
+    # Extract help metadata from DefaultHandler
+    $commandSynopsis = $null
+    $commandDescription = $null
+
+    if ($defaultHandler) {
+        $helpInfo = Get-Help $defaultHandler -ErrorAction SilentlyContinue
+        if ($helpInfo -and $helpInfo.Synopsis -and $helpInfo.Synopsis -ne $defaultHandler) {
+            $commandSynopsis = $helpInfo.Synopsis
+        }
+        if ($helpInfo -and ($helpInfo.PSObject.Properties.Name -contains 'Description') -and $helpInfo.Description -and $helpInfo.Description.Text) {
+            $commandDescription = $helpInfo.Description.Text
+        }
+    }
 
     $mappedValue = if ($defaultHandler) { $defaultHandler } else { $ModulePath }
     $script:Commands[$ModuleName.ToLower()] = $mappedValue
@@ -1026,6 +1056,8 @@ function Register-ExternalDirectoryModule {
         DefaultHandler = $defaultHandler
         HelpHandler = $helpHandler
         Root = $ModulePath
+        Synopsis = $commandSynopsis
+        Description = $commandDescription
     }
 
     Write-Verbose "Registered external directory ($Source): $ModuleName"
@@ -1234,6 +1266,7 @@ function Register-EmbeddedCommands {
                 DefaultHandler = $null
                 Subcommands = @{}
                 Synopsis = $null
+                Description = $null
             }
         }
 
@@ -1243,22 +1276,30 @@ function Register-EmbeddedCommands {
             # This is the Default Handler (e.g. Invoke-Box-Pkg)
             $group.DefaultHandler = $funcName
 
-            # Extract synopsis from main handler
+            # Extract synopsis and description from main handler
             $helpInfo = Get-Help $funcName -ErrorAction SilentlyContinue
             if ($helpInfo -and $helpInfo.Synopsis -and $helpInfo.Synopsis -ne $funcName) {
                  $group.Synopsis = $helpInfo.Synopsis
             }
+            if ($helpInfo -and ($helpInfo.PSObject.Properties.Name -contains 'Description') -and $helpInfo.Description -and $helpInfo.Description.Text) {
+                 $group.Description = $helpInfo.Description.Text
+            }
         } else {
             # This is a Subcommand (e.g. Invoke-Box-Pkg-Install)
-            # Extract help info for the subcommand
-            $subHelpInfo = Get-Help $funcName -ErrorAction SilentlyContinue
-            $subSynopsis = if ($subHelpInfo -and $subHelpInfo.Synopsis -and $subHelpInfo.Synopsis -ne $funcName) { $subHelpInfo.Synopsis } else { $null }
-            $subDescription = if ($subHelpInfo -and $subHelpInfo.Description) { ($subHelpInfo.Description | Out-String).Trim() } else { $null }
-            
+            # Extract synopsis for subcommand
+            $helpInfo = Get-Help $funcName -ErrorAction SilentlyContinue
+            $synopsis = if ($helpInfo -and $helpInfo.Synopsis -and $helpInfo.Synopsis -ne $funcName) {
+                $helpInfo.Synopsis
+            } else { $null }
+            $description = if ($helpInfo -and ($helpInfo.PSObject.Properties.Name -contains 'Description') -and $helpInfo.Description -and $helpInfo.Description.Text) {
+                $helpInfo.Description.Text
+            } else { $null }
+
+            # Store as hashtable with metadata
             $group.Subcommands[$subcommandName] = @{
                 Handler = @{ Type = 'function'; Function = $funcName }
-                Synopsis = $subSynopsis
-                Description = $subDescription
+                Synopsis = $synopsis
+                Description = $description
             }
         }
     }
@@ -1289,6 +1330,7 @@ function Register-EmbeddedCommands {
                 Subcommands = $group.Subcommands
                 DefaultHandler = $group.DefaultHandler
                 Synopsis = $group.Synopsis
+                Description = $group.Description
              }
              Write-Verbose "Registered embedded group: $commandName ($($group.Subcommands.Count) subcommands)"
         } else {
@@ -1299,6 +1341,7 @@ function Register-EmbeddedCommands {
                 Handler = $group.DefaultHandler
                 Path = (Get-Command $group.DefaultHandler).ScriptBlock.File
                 Synopsis = $group.Synopsis
+                Description = $group.Description
              }
              Write-Verbose "Registered embedded command: $commandName -> $($group.DefaultHandler)"
         }
@@ -1534,14 +1577,7 @@ function Invoke-Command {
                 }
 
                 if ($subName) {
-                    $subHandler = $subcommands[$subName]
-                    if ($subHandler -is [hashtable] -and $subHandler.ContainsKey('Handler')) {
-                        # New format: hashtable with Handler descriptor
-                        return (Invoke-HandlerDescriptor -Descriptor $subHandler.Handler -Arguments $callArgs)
-                    } else {
-                        # Old format: direct function name or script path
-                        return (& $subHandler @callArgs)
-                    }
+                    return (& $subcommands[$subName] @callArgs)
                 }
 
                 if ($defaultHandler) {
@@ -1668,7 +1704,17 @@ function Show-Help {
             if ($subPath.Count -gt 0) {
                 $subName = $subPath[0].ToLower()
                 if ($subcommands.ContainsKey($subName)) {
-                    $subHandler = Get-DescriptorField -Descriptor $subcommands[$subName] -Key 'Handler'
+                    $subValue = $subcommands[$subName]
+                    
+                    # Handle both legacy (string) and new (hashtable) formats
+                    if ($subValue -is [string]) {
+                        # Legacy: direct file path
+                        $subHandler = @{ Type = 'script'; Path = $subValue }
+                    } else {
+                        # New: hashtable with Handler field
+                        $subHandler = Get-DescriptorField -Descriptor $subValue -Key 'Handler'
+                    }
+                    
                     Show-DescriptorHelp -Descriptor $subHandler
                     return
                 }
@@ -3027,44 +3073,6 @@ function New-HelpProfile {
     }
 }
 
-function Get-HelpFromScript {
-    param(
-        [string]$ScriptPath
-    )
-
-    if (-not $ScriptPath) {
-        return @{ Synopsis = $null; Description = $null }
-    }
-
-    try {
-        # Check if it's a function name (no path separators)
-        if ($ScriptPath -notmatch '[\\/]' -and (Get-Command $ScriptPath -CommandType Function -ErrorAction SilentlyContinue)) {
-            $helpInfo = Get-Help $ScriptPath -ErrorAction SilentlyContinue
-            if ($helpInfo) {
-                return @{
-                    Synopsis = if ($helpInfo.Synopsis -and $helpInfo.Synopsis -ne $ScriptPath) { $helpInfo.Synopsis.Trim() } else { $null }
-                    Description = if ($helpInfo.Description) { ($helpInfo.Description | Out-String).Trim() } else { $null }
-                }
-            }
-        }
-        # Otherwise treat as file path
-        elseif (Test-Path $ScriptPath) {
-            $helpInfo = Get-Help $ScriptPath -ErrorAction SilentlyContinue
-            if ($helpInfo) {
-                return @{
-                    Synopsis = if ($helpInfo.Synopsis -and $helpInfo.Synopsis -ne $ScriptPath) { $helpInfo.Synopsis.Trim() } else { $null }
-                    Description = if ($helpInfo.Description) { ($helpInfo.Description | Out-String).Trim() } else { $null }
-                }
-            }
-        }
-    }
-    catch {
-        Write-Verbose "Failed to get help from ${ScriptPath}: $($_.Exception.Message)"
-    }
-
-    return @{ Synopsis = $null; Description = $null }
-}
-
 function Convert-RegistryEntryToHelpCommand {
     param(
         [hashtable]$Entry,
@@ -3080,26 +3088,6 @@ function Convert-RegistryEntryToHelpCommand {
     $description = Get-DescriptorField -Descriptor $Entry -Key 'Description'
     $source = Get-DescriptorField -Descriptor $Entry -Key 'Source'
     $isHidden = [bool](Get-DescriptorField -Descriptor $Entry -Key 'Hidden')
-
-    # For external-directory without synopsis, try to extract from default handler or first subcommand
-    if ($kind -eq 'external-directory' -and -not $synopsis) {
-        $defaultHandler = Get-DescriptorField -Descriptor $Entry -Key 'DefaultHandler'
-        if ($defaultHandler) {
-            $helpData = Get-HelpFromScript -ScriptPath $defaultHandler
-            $synopsis = $helpData.Synopsis
-            $description = $helpData.Description
-        }
-    }
-
-    # For external-file, extract help from the script
-    if ($kind -eq 'external-file' -and -not $synopsis) {
-        $handler = Get-DescriptorField -Descriptor $Entry -Key 'Handler'
-        if ($handler) {
-            $helpData = Get-HelpFromScript -ScriptPath $handler
-            $synopsis = $helpData.Synopsis
-            $description = $helpData.Description
-        }
-    }
 
     $subcommands = switch ($kind) {
         'external-directory' { Convert-RegistrySubcommands -Subcommands (Get-DescriptorField -Descriptor $Entry -Key 'Subcommands') -Context $Context }
@@ -3127,24 +3115,21 @@ function Convert-RegistrySubcommands {
         $description = $null
 
         if ($value -is [string]) {
+            # Legacy fallback: extract help metadata on-the-fly
+            $helpInfo = Get-Help $value -ErrorAction SilentlyContinue
+            if ($helpInfo -and $helpInfo.Synopsis -and $helpInfo.Synopsis -ne $value) {
+                $synopsis = $helpInfo.Synopsis
+            }
+            if ($helpInfo -and ($helpInfo.PSObject.Properties.Name -contains 'Description') -and $helpInfo.Description -and $helpInfo.Description.Text) {
+                $description = $helpInfo.Description.Text
+            }
             $handler = @{ Type = 'script'; Path = $value }
-            # Extract help from the script file
-            $helpData = Get-HelpFromScript -ScriptPath $value
-            $synopsis = $helpData.Synopsis
-            $description = $helpData.Description
         }
         elseif ($value -is [hashtable]) {
             $handler = Get-DescriptorField -Descriptor $value -Key 'Handler'
             $synopsis = Get-DescriptorField -Descriptor $value -Key 'Synopsis'
             $description = Get-DescriptorField -Descriptor $value -Key 'Description'
             if (-not $handler -and $value.ContainsKey('Path')) { $handler = @{ Type = 'script'; Path = $value['Path'] } }
-            
-            # If synopsis/description not in metadata, extract from handler
-            if (-not $synopsis -and $handler -and $handler.ContainsKey('Path')) {
-                $helpData = Get-HelpFromScript -ScriptPath $handler.Path
-                $synopsis = $helpData.Synopsis
-                $description = $helpData.Description
-            }
         }
 
         $results += New-HelpSubcommandEntry -Name $key -Synopsis $synopsis -Description $description -Handler $handler
@@ -3240,7 +3225,8 @@ function Render-HelpProfile {
     }
 
     $titleLines = Wrap-Text -Text $Profile.Title -Width $Profile.WrapWidth
-    $descriptionLines = Wrap-Text -Text $Profile.Description -Width $Profile.WrapWidth
+    $description = if ($Profile.ContainsKey('Description')) { $Profile['Description'] } else { 'No description available.' }
+    $descriptionLines = Wrap-Text -Text $description -Width $Profile.WrapWidth
 
     $lines += $titleLines
     $lines += $descriptionLines
@@ -3288,7 +3274,8 @@ function Render-CommandHelp {
     $textWidth = [Math]::Max(20, $wrap - ($nameWidth + 2))
 
     $title = if ($Entry.Name) { $Entry.Name } else { 'Command' }
-    $desc = if ($Entry.Description) { $Entry.Description } else { $Profile.Description }
+    $fallbackDesc = if ($Profile.ContainsKey('Description')) { $Profile['Description'] } else { 'No description available.' }
+    $desc = if ($Entry.ContainsKey('Description') -and $Entry['Description']) { $Entry['Description'] } else { $fallbackDesc }
 
     $lines += Wrap-Text -Text $title -Width $wrap
     $lines += Wrap-Text -Text $desc -Width $wrap
@@ -3400,7 +3387,7 @@ function Ensure-SevenZip {
 
 .NOTES
     Module: templates.ps1
-    Version: 0.1.115
+    Version: 0.1.112
 #>
 
 # ============================================================================
@@ -4604,7 +4591,6 @@ function Invoke-ConfigWizard {
 
 # BEGIN modules/box/clean.ps1
 function Invoke-Box-Clean {
-    param([string[]]$Arguments)
 <#
 .SYNOPSIS
     AmiDevBox - Complete Amiga development environment setup system
@@ -4617,6 +4603,7 @@ and temporary files (*.tmp, *.log) from the project.
 box clean
 Remove all build artifacts and temporary files
 #>
+    param([string[]]$Arguments)
 # ============================================================================
 # Box Clean Command
 # ============================================================================
@@ -4644,7 +4631,6 @@ Write-Success "Clean complete"
 # END modules/box/clean.ps1
 # BEGIN modules/box/env\env.ps1
 function Invoke-Box-Env-Env {
-    param([string[]]$Arguments)
 <#
 .SYNOPSIS
     AmiDevBox - Complete Amiga development environment setup system
@@ -4677,6 +4663,7 @@ Replace tagged values in Markdown files
 box env update
 Regenerate .env from installed packages
 #>
+    param([string[]]$Arguments)
 # ============================================================================
 # Box Env Command (Dispatcher)
 # ============================================================================
@@ -4715,7 +4702,6 @@ switch ($Sub.ToLower()) {
 # END modules/box/env\env.ps1
 # BEGIN modules/box/env\list.ps1
 function Invoke-Box-Env-List {
-    param([string[]]$Arguments)
 <#
 .SYNOPSIS
     AmiDevBox - Complete Amiga development environment setup system
@@ -4732,6 +4718,7 @@ Display all configured environment variables
 box env
 Same as 'box env list' (default behavior)
 #>
+    param([string[]]$Arguments)
 # ============================================================================
 # Box Env List Subcommand
 # ============================================================================
@@ -4761,7 +4748,6 @@ Write-Host ""
 # END modules/box/env\list.ps1
 # BEGIN modules/box/env\load.ps1
 function Invoke-Box-Env-Load {
-    param([string[]]$Arguments)
 <#
 .SYNOPSIS
     AmiDevBox - Complete Amiga development environment setup system
@@ -4779,6 +4765,7 @@ Load environment variables into current session
 This only affects the current PowerShell session.
 For permanent changes, use 'box env update' and restart terminal.
 #>
+    param([string[]]$Arguments)
 # ============================================================================
 # Box Env Load Subcommand
 # ============================================================================
@@ -4811,7 +4798,6 @@ Write-Info "Added to PATH: .box/, scripts/"
 # END modules/box/env\load.ps1
 # BEGIN modules/box/env\replace.ps1
 function Invoke-Box-Env-Replace {
-    param([string[]]$Arguments)
 <#
 .SYNOPSIS
     AmiDevBox - Complete Amiga development environment setup system
@@ -4848,6 +4834,7 @@ Copy all files to dist/ with tags replaced and stripped
 box env replace README.md -Force
 Update single file in-place
 #>
+    param([string[]]$Arguments)
 # ============================================================================
 # Box Env Replace Subcommand
 # ============================================================================
@@ -4896,7 +4883,6 @@ if ($releaseMode) {
 # END modules/box/env\replace.ps1
 # BEGIN modules/box/env\update.ps1
 function Invoke-Box-Env-Update {
-    param([string[]]$Arguments)
 <#
 .SYNOPSIS
     AmiDevBox - Complete Amiga development environment setup system
@@ -4921,6 +4907,7 @@ Automatically updates:
 - .vscode/settings.json terminal environment
 - Tagged files in project (calls Update-TaggedFiles)
 #>
+    param([string[]]$Arguments)
 # ============================================================================
 # Box Env Update Subcommand
 # ============================================================================
@@ -5002,7 +4989,6 @@ function Update-VSCodeEnv {
 # END modules/box/env\update.ps1
 # BEGIN modules/box/info.ps1
 function Invoke-Box-Info {
-    param([string[]]$Arguments)
 <#
 .SYNOPSIS
     AmiDevBox - Complete Amiga development environment setup system
@@ -5018,6 +5004,7 @@ Shows comprehensive information about the current Box workspace including:
 box info
 Display all workspace information
 #>
+    param([string[]]$Arguments)
 # ============================================================================
 # Box Info Command
 # ============================================================================
@@ -5092,7 +5079,6 @@ if ($script:BaseDir) {
 # END modules/box/info.ps1
 # BEGIN modules/box/install.ps1
 function Invoke-Box-Install {
-    param([string[]]$Arguments)
 <#
 .SYNOPSIS
     AmiDevBox - Complete Amiga development environment setup system
@@ -5110,6 +5096,7 @@ Executes the complete installation workflow for a Box project:
 box install
 Install all packages defined in configuration
 #>
+    param([string[]]$Arguments)
 # ============================================================================
 # Box Install Command
 # ============================================================================
@@ -5156,7 +5143,6 @@ Show-InstallComplete
 # END modules/box/install.ps1
 # BEGIN modules/box/load.ps1
 function Invoke-Box-Load {
-    param([string[]]$Arguments)
 <#
 .SYNOPSIS
     AmiDevBox - Complete Amiga development environment setup system
@@ -5172,6 +5158,7 @@ Sets up the complete environment in one command:
 box load
 Load full environment for current project
 #>
+    param([string[]]$Arguments)
 # ============================================================================
 # Box Load Command
 # ============================================================================
@@ -5225,7 +5212,6 @@ Write-Host ""
 # END modules/box/load.ps1
 # BEGIN modules/box/pkg.ps1
 function Invoke-Box-Pkg {
-    param([string[]]$Arguments)
 <#
 .SYNOPSIS
     AmiDevBox - Complete Amiga development environment setup system
@@ -5254,6 +5240,7 @@ Explicitly list packages
 Auto-routing handles: box pkg install, box pkg list, box pkg state, box pkg uninstall
 This file handles: box pkg (no args) → list packages
 #>
+    param([string[]]$Arguments)
 # If subcommand provided, route to it
 if ($Arguments -and $Arguments.Count -gt 0) {
     $subcommand = $Arguments[0]
@@ -5390,7 +5377,6 @@ if (-not $script:IsEmbedded) {
 # END modules/box/pkg\helpers\extraction.ps1
 # BEGIN modules/box/pkg\install.ps1
 function Invoke-Box-Pkg-Install {
-    param([string[]]$Arguments)
 <#
 .SYNOPSIS
     AmiDevBox - Complete Amiga development environment setup system
@@ -5420,6 +5406,7 @@ Install vbcc package with user prompts
 Internal function called by Invoke-Box-Install for each package.
 Handles detection of existing installations and user prompts.
 #>
+    param([string[]]$Arguments)
 # ============================================================================
 # Box Pkg Install Subcommand
 # ============================================================================
@@ -5540,7 +5527,6 @@ Write-Success "Installed"
 # END modules/box/pkg\install.ps1
 # BEGIN modules/box/pkg\list.ps1
 function Invoke-Box-Pkg-List {
-    param([string[]]$Arguments)
 <#
 .SYNOPSIS
     AmiDevBox - Complete Amiga development environment setup system
@@ -5566,6 +5552,7 @@ Status indicators:
 - ⚙ : Manually configured (user-provided paths)
 - ✗ : Not installed
 #>
+    param([string[]]$Arguments)
 # ============================================================================
 # Box Pkg List Subcommand
 # ============================================================================
@@ -5641,7 +5628,6 @@ Write-Host ""
 # END modules/box/pkg\list.ps1
 # BEGIN modules/box/pkg\state.ps1
 function Invoke-Box-Pkg-State {
-    param([string[]]$Arguments)
 <#
 .SYNOPSIS
     AmiDevBox - Complete Amiga development environment setup system
@@ -5661,6 +5647,7 @@ Display detailed state of all packages
 Useful for debugging package issues and verifying installations.
 Shows the internal state file (.box/state.json) in human-readable format.
 #>
+    param([string[]]$Arguments)
 # ============================================================================
 # Box Pkg State Subcommand
 # ============================================================================
@@ -5719,7 +5706,6 @@ catch {
 # END modules/box/pkg\state.ps1
 # BEGIN modules/box/pkg\uninstall.ps1
 function Invoke-Box-Pkg-Uninstall {
-    param([string[]]$Arguments)
 <#
 .SYNOPSIS
     AmiDevBox - Complete Amiga development environment setup system
@@ -5741,6 +5727,7 @@ Remove vbcc package and all its files
 Only removes files tracked in package state.
 Manually added files are not affected.
 #>
+    param([string[]]$Arguments)
 # ============================================================================
 # Box Pkg Uninstall Subcommand
 # ============================================================================
@@ -5770,7 +5757,6 @@ Write-Success "Package $Name removed"
 # END modules/box/pkg\uninstall.ps1
 # BEGIN modules/box/status.ps1
 function Invoke-Box-Status {
-    param([string[]]$Arguments)
 <#
 .SYNOPSIS
     AmiDevBox - Complete Amiga development environment setup system
@@ -5786,6 +5772,7 @@ Shows current project status including:
 box status
 Display complete project status
 #>
+    param([string[]]$Arguments)
 # ============================================================================
 # Box Status Command
 # ============================================================================
@@ -5837,7 +5824,6 @@ Write-Host ""
 # END modules/box/status.ps1
 # BEGIN modules/box/uninstall.ps1
 function Invoke-Box-Uninstall {
-    param([string[]]$Arguments)
 <#
 .SYNOPSIS
     AmiDevBox - Complete Amiga development environment setup system
@@ -5853,6 +5839,7 @@ Removes all installed packages and cleans up:
 box uninstall
 Remove all packages and clean up project
 #>
+    param([string[]]$Arguments)
 # ============================================================================
 # Box Uninstall Command
 # ============================================================================
@@ -5892,7 +5879,6 @@ if (Test-Path $uninstallScript) {
 # END modules/box/uninstall.ps1
 # BEGIN modules/box/update.ps1
 function Invoke-Box-Update {
-    param([string[]]$Arguments)
 <#
 .SYNOPSIS
     AmiDevBox - Complete Amiga development environment setup system
@@ -5906,6 +5892,7 @@ from the source GitHub repository.
 box update
 Update current Box project to latest version
 #>
+    param([string[]]$Arguments)
 # ============================================================================
 # Box Update Command
 # ============================================================================
@@ -5965,7 +5952,6 @@ try {
 # END modules/box/update.ps1
 # BEGIN modules/box/version.ps1
 function Invoke-Box-Version {
-    param([string[]]$Arguments)
 <#
 .SYNOPSIS
     AmiDevBox - Complete Amiga development environment setup system
@@ -5978,6 +5964,7 @@ Version is embedded in box.ps1 during build.
 box version
 Displays: Box v2.1.0
 #>
+    param([string[]]$Arguments)
 # ============================================================================
 # Box Version Command
 # ============================================================================

@@ -7,8 +7,8 @@
     Standalone boxer.ps1 with embedded core libraries and modules
 
 .NOTES
-    Build Date: 2026-01-20 02:35:40
-    Version: 0.1.189
+    Build Date: 2026-01-20 04:29:39
+    Version: 0.1.195
     Build Type: Embedded
 #>
 
@@ -25,7 +25,7 @@ $ErrorActionPreference = 'Stop'
 $script:BoxingRoot = if ($PSScriptRoot) { $PSScriptRoot } else { $env:TEMP }
 $script:Mode = 'boxer'
 $script:IsEmbedded = $true
-$script:BoxerVersion = "0.1.189"
+$script:BoxerVersion = "0.1.195"
 $script:LoadedModules = @{}
 $script:Commands = @{}
 $script:CommandRegistry = @{}
@@ -990,11 +990,41 @@ function Register-ExternalDirectoryModule {
             'metadata' { continue }
             'help' { $helpHandler = $file.FullName; continue }
             {$name -eq $ModuleName.ToLower()} { $defaultHandler = $file.FullName; continue }
-            default { $subcommands[$name] = $file.FullName }
+            default {
+                # Extract help metadata for subcommands
+                $helpInfo = Get-Help $file.FullName -ErrorAction SilentlyContinue
+                $synopsis = if ($helpInfo -and $helpInfo.Synopsis -and $helpInfo.Synopsis -ne $file.FullName) {
+                    $helpInfo.Synopsis
+                } else { $null }
+                $description = if ($helpInfo -and ($helpInfo.PSObject.Properties.Name -contains 'Description') -and $helpInfo.Description -and $helpInfo.Description.Text) {
+                    $helpInfo.Description.Text
+                } else { $null }
+
+                # Store as hashtable with metadata
+                $subcommands[$name] = @{
+                    Handler = @{ Type = 'script'; Path = $file.FullName }
+                    Synopsis = $synopsis
+                    Description = $description
+                }
+            }
         }
     }
 
     if ($script:CommandRegistry.ContainsKey($ModuleName.ToLower())) { return }
+
+    # Extract help metadata from DefaultHandler
+    $commandSynopsis = $null
+    $commandDescription = $null
+
+    if ($defaultHandler) {
+        $helpInfo = Get-Help $defaultHandler -ErrorAction SilentlyContinue
+        if ($helpInfo -and $helpInfo.Synopsis -and $helpInfo.Synopsis -ne $defaultHandler) {
+            $commandSynopsis = $helpInfo.Synopsis
+        }
+        if ($helpInfo -and ($helpInfo.PSObject.Properties.Name -contains 'Description') -and $helpInfo.Description -and $helpInfo.Description.Text) {
+            $commandDescription = $helpInfo.Description.Text
+        }
+    }
 
     $mappedValue = if ($defaultHandler) { $defaultHandler } else { $ModulePath }
     $script:Commands[$ModuleName.ToLower()] = $mappedValue
@@ -1006,6 +1036,8 @@ function Register-ExternalDirectoryModule {
         DefaultHandler = $defaultHandler
         HelpHandler = $helpHandler
         Root = $ModulePath
+        Synopsis = $commandSynopsis
+        Description = $commandDescription
     }
 
     Write-Verbose "Registered external directory ($Source): $ModuleName"
@@ -1214,6 +1246,7 @@ function Register-EmbeddedCommands {
                 DefaultHandler = $null
                 Subcommands = @{}
                 Synopsis = $null
+                Description = $null
             }
         }
 
@@ -1223,22 +1256,30 @@ function Register-EmbeddedCommands {
             # This is the Default Handler (e.g. Invoke-Box-Pkg)
             $group.DefaultHandler = $funcName
 
-            # Extract synopsis from main handler
+            # Extract synopsis and description from main handler
             $helpInfo = Get-Help $funcName -ErrorAction SilentlyContinue
             if ($helpInfo -and $helpInfo.Synopsis -and $helpInfo.Synopsis -ne $funcName) {
                  $group.Synopsis = $helpInfo.Synopsis
             }
+            if ($helpInfo -and ($helpInfo.PSObject.Properties.Name -contains 'Description') -and $helpInfo.Description -and $helpInfo.Description.Text) {
+                 $group.Description = $helpInfo.Description.Text
+            }
         } else {
             # This is a Subcommand (e.g. Invoke-Box-Pkg-Install)
-            # Extract help info for the subcommand
-            $subHelpInfo = Get-Help $funcName -ErrorAction SilentlyContinue
-            $subSynopsis = if ($subHelpInfo -and $subHelpInfo.Synopsis -and $subHelpInfo.Synopsis -ne $funcName) { $subHelpInfo.Synopsis } else { $null }
-            $subDescription = if ($subHelpInfo -and $subHelpInfo.Description) { ($subHelpInfo.Description | Out-String).Trim() } else { $null }
-            
+            # Extract synopsis for subcommand
+            $helpInfo = Get-Help $funcName -ErrorAction SilentlyContinue
+            $synopsis = if ($helpInfo -and $helpInfo.Synopsis -and $helpInfo.Synopsis -ne $funcName) {
+                $helpInfo.Synopsis
+            } else { $null }
+            $description = if ($helpInfo -and ($helpInfo.PSObject.Properties.Name -contains 'Description') -and $helpInfo.Description -and $helpInfo.Description.Text) {
+                $helpInfo.Description.Text
+            } else { $null }
+
+            # Store as hashtable with metadata
             $group.Subcommands[$subcommandName] = @{
                 Handler = @{ Type = 'function'; Function = $funcName }
-                Synopsis = $subSynopsis
-                Description = $subDescription
+                Synopsis = $synopsis
+                Description = $description
             }
         }
     }
@@ -1269,6 +1310,7 @@ function Register-EmbeddedCommands {
                 Subcommands = $group.Subcommands
                 DefaultHandler = $group.DefaultHandler
                 Synopsis = $group.Synopsis
+                Description = $group.Description
              }
              Write-Verbose "Registered embedded group: $commandName ($($group.Subcommands.Count) subcommands)"
         } else {
@@ -1279,6 +1321,7 @@ function Register-EmbeddedCommands {
                 Handler = $group.DefaultHandler
                 Path = (Get-Command $group.DefaultHandler).ScriptBlock.File
                 Synopsis = $group.Synopsis
+                Description = $group.Description
              }
              Write-Verbose "Registered embedded command: $commandName -> $($group.DefaultHandler)"
         }
@@ -1514,14 +1557,7 @@ function Invoke-Command {
                 }
 
                 if ($subName) {
-                    $subHandler = $subcommands[$subName]
-                    if ($subHandler -is [hashtable] -and $subHandler.ContainsKey('Handler')) {
-                        # New format: hashtable with Handler descriptor
-                        return (Invoke-HandlerDescriptor -Descriptor $subHandler.Handler -Arguments $callArgs)
-                    } else {
-                        # Old format: direct function name or script path
-                        return (& $subHandler @callArgs)
-                    }
+                    return (& $subcommands[$subName] @callArgs)
                 }
 
                 if ($defaultHandler) {
@@ -1648,7 +1684,17 @@ function Show-Help {
             if ($subPath.Count -gt 0) {
                 $subName = $subPath[0].ToLower()
                 if ($subcommands.ContainsKey($subName)) {
-                    $subHandler = Get-DescriptorField -Descriptor $subcommands[$subName] -Key 'Handler'
+                    $subValue = $subcommands[$subName]
+                    
+                    # Handle both legacy (string) and new (hashtable) formats
+                    if ($subValue -is [string]) {
+                        # Legacy: direct file path
+                        $subHandler = @{ Type = 'script'; Path = $subValue }
+                    } else {
+                        # New: hashtable with Handler field
+                        $subHandler = Get-DescriptorField -Descriptor $subValue -Key 'Handler'
+                    }
+                    
                     Show-DescriptorHelp -Descriptor $subHandler
                     return
                 }
@@ -1827,44 +1873,6 @@ function New-HelpProfile {
     }
 }
 
-function Get-HelpFromScript {
-    param(
-        [string]$ScriptPath
-    )
-
-    if (-not $ScriptPath) {
-        return @{ Synopsis = $null; Description = $null }
-    }
-
-    try {
-        # Check if it's a function name (no path separators)
-        if ($ScriptPath -notmatch '[\\/]' -and (Get-Command $ScriptPath -CommandType Function -ErrorAction SilentlyContinue)) {
-            $helpInfo = Get-Help $ScriptPath -ErrorAction SilentlyContinue
-            if ($helpInfo) {
-                return @{
-                    Synopsis = if ($helpInfo.Synopsis -and $helpInfo.Synopsis -ne $ScriptPath) { $helpInfo.Synopsis.Trim() } else { $null }
-                    Description = if ($helpInfo.Description) { ($helpInfo.Description | Out-String).Trim() } else { $null }
-                }
-            }
-        }
-        # Otherwise treat as file path
-        elseif (Test-Path $ScriptPath) {
-            $helpInfo = Get-Help $ScriptPath -ErrorAction SilentlyContinue
-            if ($helpInfo) {
-                return @{
-                    Synopsis = if ($helpInfo.Synopsis -and $helpInfo.Synopsis -ne $ScriptPath) { $helpInfo.Synopsis.Trim() } else { $null }
-                    Description = if ($helpInfo.Description) { ($helpInfo.Description | Out-String).Trim() } else { $null }
-                }
-            }
-        }
-    }
-    catch {
-        Write-Verbose "Failed to get help from ${ScriptPath}: $($_.Exception.Message)"
-    }
-
-    return @{ Synopsis = $null; Description = $null }
-}
-
 function Convert-RegistryEntryToHelpCommand {
     param(
         [hashtable]$Entry,
@@ -1880,26 +1888,6 @@ function Convert-RegistryEntryToHelpCommand {
     $description = Get-DescriptorField -Descriptor $Entry -Key 'Description'
     $source = Get-DescriptorField -Descriptor $Entry -Key 'Source'
     $isHidden = [bool](Get-DescriptorField -Descriptor $Entry -Key 'Hidden')
-
-    # For external-directory without synopsis, try to extract from default handler or first subcommand
-    if ($kind -eq 'external-directory' -and -not $synopsis) {
-        $defaultHandler = Get-DescriptorField -Descriptor $Entry -Key 'DefaultHandler'
-        if ($defaultHandler) {
-            $helpData = Get-HelpFromScript -ScriptPath $defaultHandler
-            $synopsis = $helpData.Synopsis
-            $description = $helpData.Description
-        }
-    }
-
-    # For external-file, extract help from the script
-    if ($kind -eq 'external-file' -and -not $synopsis) {
-        $handler = Get-DescriptorField -Descriptor $Entry -Key 'Handler'
-        if ($handler) {
-            $helpData = Get-HelpFromScript -ScriptPath $handler
-            $synopsis = $helpData.Synopsis
-            $description = $helpData.Description
-        }
-    }
 
     $subcommands = switch ($kind) {
         'external-directory' { Convert-RegistrySubcommands -Subcommands (Get-DescriptorField -Descriptor $Entry -Key 'Subcommands') -Context $Context }
@@ -1927,24 +1915,21 @@ function Convert-RegistrySubcommands {
         $description = $null
 
         if ($value -is [string]) {
+            # Legacy fallback: extract help metadata on-the-fly
+            $helpInfo = Get-Help $value -ErrorAction SilentlyContinue
+            if ($helpInfo -and $helpInfo.Synopsis -and $helpInfo.Synopsis -ne $value) {
+                $synopsis = $helpInfo.Synopsis
+            }
+            if ($helpInfo -and ($helpInfo.PSObject.Properties.Name -contains 'Description') -and $helpInfo.Description -and $helpInfo.Description.Text) {
+                $description = $helpInfo.Description.Text
+            }
             $handler = @{ Type = 'script'; Path = $value }
-            # Extract help from the script file
-            $helpData = Get-HelpFromScript -ScriptPath $value
-            $synopsis = $helpData.Synopsis
-            $description = $helpData.Description
         }
         elseif ($value -is [hashtable]) {
             $handler = Get-DescriptorField -Descriptor $value -Key 'Handler'
             $synopsis = Get-DescriptorField -Descriptor $value -Key 'Synopsis'
             $description = Get-DescriptorField -Descriptor $value -Key 'Description'
             if (-not $handler -and $value.ContainsKey('Path')) { $handler = @{ Type = 'script'; Path = $value['Path'] } }
-            
-            # If synopsis/description not in metadata, extract from handler
-            if (-not $synopsis -and $handler -and $handler.ContainsKey('Path')) {
-                $helpData = Get-HelpFromScript -ScriptPath $handler.Path
-                $synopsis = $helpData.Synopsis
-                $description = $helpData.Description
-            }
         }
 
         $results += New-HelpSubcommandEntry -Name $key -Synopsis $synopsis -Description $description -Handler $handler
@@ -2040,7 +2025,8 @@ function Render-HelpProfile {
     }
 
     $titleLines = Wrap-Text -Text $Profile.Title -Width $Profile.WrapWidth
-    $descriptionLines = Wrap-Text -Text $Profile.Description -Width $Profile.WrapWidth
+    $description = if ($Profile.ContainsKey('Description')) { $Profile['Description'] } else { 'No description available.' }
+    $descriptionLines = Wrap-Text -Text $description -Width $Profile.WrapWidth
 
     $lines += $titleLines
     $lines += $descriptionLines
@@ -2088,7 +2074,8 @@ function Render-CommandHelp {
     $textWidth = [Math]::Max(20, $wrap - ($nameWidth + 2))
 
     $title = if ($Entry.Name) { $Entry.Name } else { 'Command' }
-    $desc = if ($Entry.Description) { $Entry.Description } else { $Profile.Description }
+    $fallbackDesc = if ($Profile.ContainsKey('Description')) { $Profile['Description'] } else { 'No description available.' }
+    $desc = if ($Entry.ContainsKey('Description') -and $Entry['Description']) { $Entry['Description'] } else { $fallbackDesc }
 
     $lines += Wrap-Text -Text $title -Width $wrap
     $lines += Wrap-Text -Text $desc -Width $wrap
@@ -2392,12 +2379,6 @@ function Get-BoxerVersion {
 
 # BEGIN modules/boxer/init.ps1
 function Invoke-Boxer-Init {
-# ============================================================================
-# Boxer Init Module
-# ============================================================================
-#
-# Handles boxer init command - creating new Box projects
-
 <#
 .SYNOPSIS
 Creates a new Box project with full structure.
@@ -2430,6 +2411,11 @@ boxer init MyProject C:\Dev\MyProject
 boxer init -Name MyProject -Box AmiDevBox
 # Explicitly specifies box to use
 #>
+# ============================================================================
+# Boxer Init Module
+# ============================================================================
+#
+# Handles boxer init command - creating new Box projects
 param(
     [Parameter(Position=0)]
     [string]$Name = "",
@@ -2782,10 +2768,6 @@ function Get-InstalledBoxes {
 # END modules/boxer/init.ps1
 # BEGIN modules/boxer/install.ps1
 function Invoke-Boxer-Install {
-# ============================================================================
-# Boxer Install Command
-# ============================================================================
-
 <#
 .SYNOPSIS
 Install a Box from registry or GitHub.
@@ -2805,6 +2787,9 @@ Install AmiDevBox from registry
 boxer install https://github.com/vbuzzano/AmiDevBox
 Install directly from GitHub URL
 #>
+# ============================================================================
+# Boxer Install Command
+# ============================================================================
 param(
     [Parameter(ValueFromRemainingArguments=$true)]
     [string[]]$Arguments
@@ -3097,10 +3082,6 @@ function Get-RemoteBoxVersion {
 # END modules/boxer/install.ps1
 # BEGIN modules/boxer/list.ps1
 function Invoke-Boxer-List {
-# ============================================================================
-# Boxer List Command
-# ============================================================================
-
 <#
 .SYNOPSIS
 List all installed Box types.
@@ -3114,7 +3095,9 @@ not development boxes in the repository.
 boxer list
 Show all installed boxes with version and description
 #>
-
+# ============================================================================
+# Boxer List Command
+# ============================================================================
 Write-Host ""
 Write-Host "Installed Boxes:" -ForegroundColor Cyan
 Write-Host ""
@@ -3187,10 +3170,6 @@ Write-Host ""
 # END modules/boxer/list.ps1
 # BEGIN modules/boxer/update.ps1
 function Invoke-Boxer-Update {
-# ============================================================================
-# Boxer Update Command
-# ============================================================================
-
 <#
 .SYNOPSIS
 Update a Box project to latest version.
@@ -3211,6 +3190,9 @@ Update Box project in current directory
 boxer update C:\Projects\MyProject
 Update specific project at given path
 #>
+# ============================================================================
+# Boxer Update Command
+# ============================================================================
 param(
     [Parameter(Position=0)]
     [string]$Path = "."
@@ -3260,10 +3242,6 @@ try {
 # END modules/boxer/update.ps1
 # BEGIN modules/boxer/version.ps1
 function Invoke-Boxer-Version {
-# ============================================================================
-# Boxer Version Command
-# ============================================================================
-
 <#
 .SYNOPSIS
 Display Boxer version information.
@@ -3276,7 +3254,9 @@ Version is embedded in the boxer.ps1 script during build.
 boxer version
 Displays: Boxer v2.1.0
 #>
-
+# ============================================================================
+# Boxer Version Command
+# ============================================================================
 $BoxerVersion = Get-BoxerVersion
 if (-not $BoxerVersion) { $BoxerVersion = "Unknown" }
 
