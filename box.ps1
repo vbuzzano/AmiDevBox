@@ -7,8 +7,8 @@
     Standalone box.ps1 with embedded core libraries and modules
 
 .NOTES
-    Build Date: 2026-01-19
-    Version: 0.1.111
+    Build Date: 2026-01-20
+    Version: 0.1.112
     Build Type: Embedded
 #>
 
@@ -46,7 +46,7 @@ while ($true) {
 $script:BoxingRoot = $BaseDir
 $script:Mode = 'box'
 $script:IsEmbedded = $true
-$script:BoxerVersion = "0.1.111"
+$script:BoxerVersion = "0.1.112"
 $script:LoadedModules = @{}
 $script:Commands = @{}
 $script:CommandRegistry = @{}
@@ -3315,7 +3315,7 @@ function Ensure-SevenZip {
 
 .NOTES
     Module: templates.ps1
-    Version: 0.1.111
+    Version: 0.1.112
 #>
 
 # ============================================================================
@@ -4520,10 +4520,6 @@ function Invoke-ConfigWizard {
 # BEGIN modules/box/clean.ps1
 function Invoke-Box-Clean {
     param([string[]]$Arguments)
-# ============================================================================
-# Box Clean Command
-# ============================================================================
-
 <#
 .SYNOPSIS
     AmiDevBox - Complete Amiga development environment setup system
@@ -4536,7 +4532,9 @@ and temporary files (*.tmp, *.log) from the project.
 box clean
 Remove all build artifacts and temporary files
 #>
-
+# ============================================================================
+# Box Clean Command
+# ============================================================================
 Write-Title "Cleaning Build Artifacts"
 
 # Clean common build directories
@@ -4562,10 +4560,6 @@ Write-Success "Clean complete"
 # BEGIN modules/box/env\env.ps1
 function Invoke-Box-Env-Env {
     param([string[]]$Arguments)
-# ============================================================================
-# Box Env Command (Dispatcher)
-# ============================================================================
-
 <#
 .SYNOPSIS
     AmiDevBox - Complete Amiga development environment setup system
@@ -4598,7 +4592,9 @@ Replace tagged values in Markdown files
 box env update
 Regenerate .env from installed packages
 #>
-
+# ============================================================================
+# Box Env Command (Dispatcher)
+# ============================================================================
 param(
     [Parameter(Position=0)]
     [string]$Sub
@@ -4635,10 +4631,6 @@ switch ($Sub.ToLower()) {
 # BEGIN modules/box/env\list.ps1
 function Invoke-Box-Env-List {
     param([string[]]$Arguments)
-# ============================================================================
-# Box Env List Subcommand
-# ============================================================================
-
 <#
 .SYNOPSIS
     AmiDevBox - Complete Amiga development environment setup system
@@ -4655,7 +4647,9 @@ Display all configured environment variables
 box env
 Same as 'box env list' (default behavior)
 #>
-
+# ============================================================================
+# Box Env List Subcommand
+# ============================================================================
 Write-Host ""
 Write-Host "Environment Variables:" -ForegroundColor Cyan
 Write-Host ""
@@ -4683,10 +4677,6 @@ Write-Host ""
 # BEGIN modules/box/env\load.ps1
 function Invoke-Box-Env-Load {
     param([string[]]$Arguments)
-# ============================================================================
-# Box Env Load Subcommand
-# ============================================================================
-
 <#
 .SYNOPSIS
     AmiDevBox - Complete Amiga development environment setup system
@@ -4704,7 +4694,9 @@ Load environment variables into current session
 This only affects the current PowerShell session.
 For permanent changes, use 'box env update' and restart terminal.
 #>
-
+# ============================================================================
+# Box Env Load Subcommand
+# ============================================================================
 $envFile = Join-Path $BaseDir ".env"
 
 if (-not (Test-Path $envFile)) {
@@ -4735,10 +4727,6 @@ Write-Info "Added to PATH: .box/, scripts/"
 # BEGIN modules/box/env\replace.ps1
 function Invoke-Box-Env-Replace {
     param([string[]]$Arguments)
-# ============================================================================
-# Box Env Replace Subcommand
-# ============================================================================
-
 <#
 .SYNOPSIS
     AmiDevBox - Complete Amiga development environment setup system
@@ -4775,6 +4763,9 @@ Copy all files to dist/ with tags replaced and stripped
 box env replace README.md -Force
 Update single file in-place
 #>
+# ============================================================================
+# Box Env Replace Subcommand
+# ============================================================================
 param(
     [Parameter(Position = 0, Mandatory = $true)]
     [string]$Path,
@@ -4821,10 +4812,6 @@ if ($releaseMode) {
 # BEGIN modules/box/env\update.ps1
 function Invoke-Box-Env-Update {
     param([string[]]$Arguments)
-# ============================================================================
-# Box Env Update Subcommand
-# ============================================================================
-
 <#
 .SYNOPSIS
     AmiDevBox - Complete Amiga development environment setup system
@@ -4849,7 +4836,9 @@ Automatically updates:
 - .vscode/settings.json terminal environment
 - Tagged files in project (calls Update-TaggedFiles)
 #>
-
+# ============================================================================
+# Box Env Update Subcommand
+# ============================================================================
 Generate-AllEnvFiles
 Update-VSCodeEnv
 Update-TaggedFiles -Path $BaseDir -Recurse
@@ -4929,10 +4918,6 @@ function Update-VSCodeEnv {
 # BEGIN modules/box/info.ps1
 function Invoke-Box-Info {
     param([string[]]$Arguments)
-# ============================================================================
-# Box Info Command
-# ============================================================================
-
 <#
 .SYNOPSIS
     AmiDevBox - Complete Amiga development environment setup system
@@ -4948,7 +4933,9 @@ Shows comprehensive information about the current Box workspace including:
 box info
 Display all workspace information
 #>
-
+# ============================================================================
+# Box Info Command
+# ============================================================================
 Write-Host ""
 Write-Host "Box Workspace Information" -ForegroundColor Cyan
 Write-Host ("=" * 60) -ForegroundColor DarkGray
@@ -5021,10 +5008,6 @@ if ($script:BaseDir) {
 # BEGIN modules/box/install.ps1
 function Invoke-Box-Install {
     param([string[]]$Arguments)
-# ============================================================================
-# Box Install Command
-# ============================================================================
-
 <#
 .SYNOPSIS
     AmiDevBox - Complete Amiga development environment setup system
@@ -5042,7 +5025,9 @@ Executes the complete installation workflow for a Box project:
 box install
 Install all packages defined in configuration
 #>
-
+# ============================================================================
+# Box Install Command
+# ============================================================================
 Write-Title "$($Config.Project.Name) Setup"
 
 # Run config wizard if needed
@@ -5087,10 +5072,6 @@ Show-InstallComplete
 # BEGIN modules/box/load.ps1
 function Invoke-Box-Load {
     param([string[]]$Arguments)
-# ============================================================================
-# Box Load Command
-# ============================================================================
-
 <#
 .SYNOPSIS
     AmiDevBox - Complete Amiga development environment setup system
@@ -5106,7 +5087,9 @@ Sets up the complete environment in one command:
 box load
 Load full environment for current project
 #>
-
+# ============================================================================
+# Box Load Command
+# ============================================================================
 Write-Host ""
 Write-Host "Loading Boxing environment..." -ForegroundColor Cyan
 Write-Host ""
@@ -5186,7 +5169,6 @@ Explicitly list packages
 Auto-routing handles: box pkg install, box pkg list, box pkg state, box pkg uninstall
 This file handles: box pkg (no args) → list packages
 #>
-
 # If subcommand provided, route to it
 if ($Arguments -and $Arguments.Count -gt 0) {
     $subcommand = $Arguments[0]
@@ -5200,8 +5182,6 @@ if ($Arguments -and $Arguments.Count -gt 0) {
 }
 # END modules/box/pkg.ps1
 # BEGIN modules/box/pkg\helpers\dependencies.ps1
-function Invoke-Box-Pkg-Helpers-Dependencies {
-    param([string[]]$Arguments)
 # ============================================================================
 # Package Dependency Validation Module
 # ============================================================================
@@ -5288,11 +5268,8 @@ function Validate-PackageDependencies {
     return $envPaths
 }
 
-}
 # END modules/box/pkg\helpers\dependencies.ps1
 # BEGIN modules/box/pkg\helpers\detection.ps1
-function Invoke-Box-Pkg-Helpers-Detection {
-    param([string[]]$Arguments)
 function Test-PackageInstalled {
     param([hashtable]$Package)
 
@@ -5309,11 +5286,8 @@ function Test-PackageInstalled {
     return @{ Installed = $false; Source = $null; Path = $null }
 }
 
-}
 # END modules/box/pkg\helpers\detection.ps1
 # BEGIN modules/box/pkg\helpers\extraction.ps1
-function Invoke-Box-Pkg-Helpers-Extraction {
-    param([string[]]$Arguments)
 # Load core extract library if not embedded (embedded builds already have it)
 if (-not $script:IsEmbedded) {
     # Check if Extract-Package function already exists (already loaded)
@@ -5328,15 +5302,10 @@ if (-not $script:IsEmbedded) {
     }
 }
 
-}
 # END modules/box/pkg\helpers\extraction.ps1
 # BEGIN modules/box/pkg\install.ps1
 function Invoke-Box-Pkg-Install {
     param([string[]]$Arguments)
-# ============================================================================
-# Box Pkg Install Subcommand
-# ============================================================================
-
 <#
 .SYNOPSIS
     AmiDevBox - Complete Amiga development environment setup system
@@ -5366,6 +5335,9 @@ Install vbcc package with user prompts
 Internal function called by Invoke-Box-Install for each package.
 Handles detection of existing installations and user prompts.
 #>
+# ============================================================================
+# Box Pkg Install Subcommand
+# ============================================================================
 param([hashtable]$Item)
 
 $name = $Item.Name
@@ -5484,10 +5456,6 @@ Write-Success "Installed"
 # BEGIN modules/box/pkg\list.ps1
 function Invoke-Box-Pkg-List {
     param([string[]]$Arguments)
-# ============================================================================
-# Box Pkg List Subcommand
-# ============================================================================
-
 <#
 .SYNOPSIS
     AmiDevBox - Complete Amiga development environment setup system
@@ -5513,7 +5481,9 @@ Status indicators:
 - ⚙ : Manually configured (user-provided paths)
 - ✗ : Not installed
 #>
-
+# ============================================================================
+# Box Pkg List Subcommand
+# ============================================================================
 Write-Host ""
 Write-Host "Packages:" -ForegroundColor Cyan
 Write-Host ""
@@ -5587,10 +5557,6 @@ Write-Host ""
 # BEGIN modules/box/pkg\state.ps1
 function Invoke-Box-Pkg-State {
     param([string[]]$Arguments)
-# ============================================================================
-# Box Pkg State Subcommand
-# ============================================================================
-
 <#
 .SYNOPSIS
     AmiDevBox - Complete Amiga development environment setup system
@@ -5610,7 +5576,9 @@ Display detailed state of all packages
 Useful for debugging package issues and verifying installations.
 Shows the internal state file (.box/state.json) in human-readable format.
 #>
-
+# ============================================================================
+# Box Pkg State Subcommand
+# ============================================================================
 $statePath = Join-Path $ProjectRoot ".box\state.json"
 
 if (-not (Test-Path $statePath)) {
@@ -5667,10 +5635,6 @@ catch {
 # BEGIN modules/box/pkg\uninstall.ps1
 function Invoke-Box-Pkg-Uninstall {
     param([string[]]$Arguments)
-# ============================================================================
-# Box Pkg Uninstall Subcommand
-# ============================================================================
-
 <#
 .SYNOPSIS
     AmiDevBox - Complete Amiga development environment setup system
@@ -5692,6 +5656,9 @@ Remove vbcc package and all its files
 Only removes files tracked in package state.
 Manually added files are not affected.
 #>
+# ============================================================================
+# Box Pkg Uninstall Subcommand
+# ============================================================================
 param([string]$Name)
 
 $pkgState = Get-PackageState $Name
@@ -5719,10 +5686,6 @@ Write-Success "Package $Name removed"
 # BEGIN modules/box/status.ps1
 function Invoke-Box-Status {
     param([string[]]$Arguments)
-# ============================================================================
-# Box Status Command
-# ============================================================================
-
 <#
 .SYNOPSIS
     AmiDevBox - Complete Amiga development environment setup system
@@ -5738,7 +5701,9 @@ Shows current project status including:
 box status
 Display complete project status
 #>
-
+# ============================================================================
+# Box Status Command
+# ============================================================================
 Write-Host ""
 Write-Host "Project Status" -ForegroundColor Cyan
 Write-Host ("=" * 60) -ForegroundColor DarkGray
@@ -5788,10 +5753,6 @@ Write-Host ""
 # BEGIN modules/box/uninstall.ps1
 function Invoke-Box-Uninstall {
     param([string[]]$Arguments)
-# ============================================================================
-# Box Uninstall Command
-# ============================================================================
-
 <#
 .SYNOPSIS
     AmiDevBox - Complete Amiga development environment setup system
@@ -5807,7 +5768,9 @@ Removes all installed packages and cleans up:
 box uninstall
 Remove all packages and clean up project
 #>
-
+# ============================================================================
+# Box Uninstall Command
+# ============================================================================
 Write-Title "Uninstall Environment"
 
 # Check for custom uninstall script
@@ -5845,10 +5808,6 @@ if (Test-Path $uninstallScript) {
 # BEGIN modules/box/update.ps1
 function Invoke-Box-Update {
     param([string[]]$Arguments)
-# ============================================================================
-# Box Update Command
-# ============================================================================
-
 <#
 .SYNOPSIS
     AmiDevBox - Complete Amiga development environment setup system
@@ -5862,7 +5821,9 @@ from the source GitHub repository.
 box update
 Update current Box project to latest version
 #>
-
+# ============================================================================
+# Box Update Command
+# ============================================================================
 Write-Host ""
 Write-Host "Updating box..." -ForegroundColor Cyan
 Write-Host ""
@@ -5920,10 +5881,6 @@ try {
 # BEGIN modules/box/version.ps1
 function Invoke-Box-Version {
     param([string[]]$Arguments)
-# ============================================================================
-# Box Version Command
-# ============================================================================
-
 <#
 .SYNOPSIS
     AmiDevBox - Complete Amiga development environment setup system
@@ -5936,7 +5893,9 @@ Version is embedded in box.ps1 during build.
 box version
 Displays: Box v2.1.0
 #>
-
+# ============================================================================
+# Box Version Command
+# ============================================================================
 $BoxVersion = Get-BoxerVersion
 if (-not $BoxVersion) { $BoxVersion = "Unknown" }
 
