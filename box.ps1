@@ -8,7 +8,7 @@
 
 .NOTES
     Build Date: 2026-01-20
-    Version: 0.1.119
+    Version: 0.1.120
     Build Type: Embedded
 #>
 
@@ -46,7 +46,7 @@ while ($true) {
 $script:BoxingRoot = $BaseDir
 $script:Mode = 'box'
 $script:IsEmbedded = $true
-$script:BoxerVersion = "0.1.119"
+$script:BoxerVersion = "0.1.120"
 $script:LoadedModules = @{}
 $script:Commands = @{}
 $script:CommandRegistry = @{}
@@ -888,23 +888,6 @@ function Invoke-HandlerDescriptor {
     }
 }
 
-# Display help for a handler descriptor
-function Show-DescriptorHelp {
-    param([hashtable]$Descriptor)
-
-    if (-not $Descriptor) { return }
-
-    switch ($Descriptor.Type) {
-        'script' { Get-Help $Descriptor.Path -ErrorAction SilentlyContinue | Out-String | Write-Output }
-        'function' { Get-Help $Descriptor.Function -ErrorAction SilentlyContinue | Out-String | Write-Output }
-        'file-function' {
-            . $Descriptor.Path
-            Get-Help $Descriptor.Function -ErrorAction SilentlyContinue | Out-String | Write-Output
-        }
-        default { Write-Output "No help available" }
-    }
-}
-
 # END core/metadata.ps1
 # BEGIN core/module-loader.ps1
 # Module Loader - Module discovery and registration
@@ -1636,143 +1619,6 @@ function Invoke-Command {
     catch {
         Write-Error "Command execution failed: $_"
         return 1
-    }
-}
-
-# Help system supporting embedded, external, and metadata modules
-function Show-Help {
-    param([string[]]$CommandPath = @())
-
-    if (-not (Get-Command -Name 'New-HelpProfileFromRegistry' -ErrorAction SilentlyContinue)) {
-        $localHelp = Join-Path $script:BoxingRoot 'core/help.ps1'
-        $fallbackHelp = Join-Path $PSScriptRoot 'core/help.ps1'
-
-        if (Test-Path $localHelp) {
-            . $localHelp
-        }
-        elseif (Test-Path $fallbackHelp) {
-            . $fallbackHelp
-        }
-    }
-
-    if (-not $CommandPath) {
-        $CommandPath = @()
-    }
-    else {
-        $CommandPath = @($CommandPath)
-    }
-
-    if (-not $CommandPath -or $CommandPath.Count -eq 0) {
-        $context = if ($script:Mode -and $script:Mode.ToLower() -eq 'boxer') { 'boxer' } else { 'box' }
-        $profile = New-HelpProfileFromRegistry -Context $context -Registry $script:CommandRegistry -Title $null -Description $null -Header $null
-        $lines = Render-HelpProfile -Profile $profile
-        foreach ($line in $lines) { Write-Output $line }
-        return
-    }
-
-    $commandName = $CommandPath[0].ToLower()
-
-    if (-not $script:CommandRegistry.ContainsKey($commandName)) {
-        Write-Output "Unknown command: $commandName"
-        return
-    }
-
-    $entry = $script:CommandRegistry[$commandName]
-    $subPath = if ($CommandPath.Count -gt 1) { @($CommandPath[1..($CommandPath.Count - 1)]) } else { @() }
-    $subPath = @($subPath)
-    $kind = Get-DescriptorField -Descriptor $entry -Key 'Kind'
-
-    switch ($kind) {
-        'embedded' {
-            $handler = Get-DescriptorField -Descriptor $entry -Key 'Handler'
-            $profile = New-HelpProfile -Context 'boxer' -Title $null -Description $null -Header $null -Commands @(Convert-RegistryEntryToHelpCommand -Entry $entry -Context 'boxer')
-            $lines = Render-CommandHelp -Entry (Convert-RegistryEntryToHelpCommand -Entry $entry -Context 'boxer') -Profile $profile -SubPath $subPath
-            foreach ($line in $lines) { Write-Output $line }
-        }
-        'external-file' {
-            $handler = Get-DescriptorField -Descriptor $entry -Key 'Handler'
-            $profile = New-HelpProfile -Context 'box' -Title $null -Description $null -Header $null -Commands @(Convert-RegistryEntryToHelpCommand -Entry $entry -Context 'box')
-            $lines = Render-CommandHelp -Entry (Convert-RegistryEntryToHelpCommand -Entry $entry -Context 'box') -Profile $profile -SubPath $subPath
-            foreach ($line in $lines) { Write-Output $line }
-        }
-        'external-directory' {
-            $subcommands = Get-DescriptorField -Descriptor $entry -Key 'Subcommands'
-            if (-not $subcommands) { $subcommands = @{} }
-            $helpHandler = Get-DescriptorField -Descriptor $entry -Key 'HelpHandler'
-            $defaultHandler = Get-DescriptorField -Descriptor $entry -Key 'DefaultHandler'
-
-            if ($subPath.Count -gt 0) {
-                $subName = $subPath[0].ToLower()
-                if ($subcommands.ContainsKey($subName)) {
-                    $subValue = $subcommands[$subName]
-                    
-                    # Handle both legacy (string) and new (hashtable) formats
-                    if ($subValue -is [string]) {
-                        # Legacy: direct file path
-                        $subHandler = @{ Type = 'script'; Path = $subValue }
-                    } else {
-                        # New: hashtable with Handler field
-                        $subHandler = Get-DescriptorField -Descriptor $subValue -Key 'Handler'
-                    }
-                    
-                    Show-DescriptorHelp -Descriptor $subHandler
-                    return
-                }
-            }
-
-            if ($helpHandler) {
-                $helpOutput = & $helpHandler @()
-                if ($helpOutput) { $helpOutput | ForEach-Object { Write-Output $_ } }
-                return
-            }
-
-            $profile = New-HelpProfile -Context 'box' -Title $null -Description $null -Header $null -Commands @(Convert-RegistryEntryToHelpCommand -Entry $entry -Context 'box')
-            $lines = Render-CommandHelp -Entry (Convert-RegistryEntryToHelpCommand -Entry $entry -Context 'box') -Profile $profile -SubPath $subPath
-            foreach ($line in $lines) { Write-Output $line }
-        }
-        'metadata' {
-            $dispatcher = Get-DescriptorField -Descriptor $entry -Key 'Dispatcher'
-            $subcommands = Get-DescriptorField -Descriptor $entry -Key 'Subcommands'
-            if (-not $subcommands) { $subcommands = @{} }
-            $helpHandler = Get-DescriptorField -Descriptor $entry -Key 'HelpHandler'
-            $handler = Get-DescriptorField -Descriptor $entry -Key 'Handler'
-            $name = Get-DescriptorField -Descriptor $entry -Key 'Name'
-
-            if ($dispatcher) {
-                $helpPath = @($name)
-                if ($subPath.Count -gt 0) { $helpPath += $subPath }
-                $helpPath += 'help'
-                Invoke-DispatcherDescriptor -Descriptor $dispatcher -CommandPath $helpPath -Arguments @()
-                return
-            }
-
-            if ($subPath.Count -gt 0) {
-                $subName = $subPath[0].ToLower()
-                if ($subcommands.ContainsKey($subName)) {
-                    $subHandler = Get-DescriptorField -Descriptor $subcommands[$subName] -Key 'Handler'
-                    Show-DescriptorHelp -Descriptor $subHandler
-                    return
-                }
-            }
-
-            if ($helpHandler) {
-                $helpOutput = & $helpHandler @()
-                if ($helpOutput) { $helpOutput | ForEach-Object { Write-Output $_ } }
-                return
-            }
-
-            if ($handler) {
-                Show-DescriptorHelp -Descriptor $handler
-            }
-            else {
-                $profile = New-HelpProfile -Context 'box' -Title $null -Description $null -Header $null -Commands @(Convert-RegistryEntryToHelpCommand -Entry $entry -Context 'box')
-                $lines = Render-CommandHelp -Entry (Convert-RegistryEntryToHelpCommand -Entry $entry -Context 'box') -Profile $profile -SubPath $subPath
-                foreach ($line in $lines) { Write-Output $line }
-            }
-        }
-        default {
-            Write-Output "No help available for $commandName"
-        }
     }
 }
 
@@ -3275,7 +3121,7 @@ function Render-CommandHelp {
 
     $title = if ($Entry.Name) { $Entry.Name } else { 'Command' }
     $fallbackDesc = if ($Profile.ContainsKey('Description')) { $Profile['Description'] } else { 'No description available.' }
-    $desc = if ($Entry.ContainsKey('Description') -and $Entry['Description']) { $Entry['Description'] } else { $fallbackDesc }
+    $desc = if ($Entry.ContainsKey('Description') -and $Entry['Description'] -and $Entry['Description'].Trim() -ne '') { $Entry['Description'] } else { $fallbackDesc }
 
     $lines += Wrap-Text -Text $title -Width $wrap
     $lines += Wrap-Text -Text $desc -Width $wrap
@@ -3303,6 +3149,196 @@ function Render-CommandHelp {
     }
 
     return $lines
+}
+
+function Get-HelpFromDescriptor {
+    param([hashtable]$Descriptor)
+
+    if (-not $Descriptor) { return $null }
+
+    $helpInfo = $null
+    switch ($Descriptor.Type) {
+        'script' {
+            $helpInfo = Get-Help $Descriptor.Path -ErrorAction SilentlyContinue
+        }
+        'function' {
+            $helpInfo = Get-Help $Descriptor.Function -ErrorAction SilentlyContinue
+        }
+        'file-function' {
+            . $Descriptor.Path
+            $helpInfo = Get-Help $Descriptor.Function -ErrorAction SilentlyContinue
+        }
+    }
+
+    if (-not $helpInfo) { return $null }
+
+    $synopsis = if ($helpInfo.Synopsis) { $helpInfo.Synopsis.Trim() } else { '' }
+    $description = ''
+    if ($helpInfo.PSObject.Properties['Description'] -and $helpInfo.Description) {
+        $description = ($helpInfo.Description | Out-String).Trim()
+    }
+
+    return @{
+        Synopsis = $synopsis
+        Description = $description
+    }
+}
+
+function Show-Help {
+    param([string[]]$CommandPath = @())
+
+    if (-not (Get-Command -Name 'New-HelpProfileFromRegistry' -ErrorAction SilentlyContinue)) {
+        $localHelp = Join-Path $script:BoxingRoot 'core/help.ps1'
+        $fallbackHelp = Join-Path $PSScriptRoot 'core/help.ps1'
+
+        if (Test-Path $localHelp) {
+            . $localHelp
+        }
+        elseif (Test-Path $fallbackHelp) {
+            . $fallbackHelp
+        }
+    }
+
+    if (-not $CommandPath) {
+        $CommandPath = @()
+    }
+    else {
+        $CommandPath = @($CommandPath)
+    }
+
+    if (-not $CommandPath -or $CommandPath.Count -eq 0) {
+        $context = if ($script:Mode -and $script:Mode.ToLower() -eq 'boxer') { 'boxer' } else { 'box' }
+        $profile = New-HelpProfileFromRegistry -Context $context -Registry $script:CommandRegistry -Title $null -Description $null -Header $null
+        $lines = Render-HelpProfile -Profile $profile
+        foreach ($line in $lines) { Write-Output $line }
+        return
+    }
+
+    $commandName = $CommandPath[0].ToLower()
+
+    if (-not $script:CommandRegistry.ContainsKey($commandName)) {
+        Write-Output "Unknown command: $commandName"
+        return
+    }
+
+    $entry = $script:CommandRegistry[$commandName]
+    $subPath = if ($CommandPath.Count -gt 1) { @($CommandPath[1..($CommandPath.Count - 1)]) } else { @() }
+    $subPath = @($subPath)
+    $kind = Get-DescriptorField -Descriptor $entry -Key 'Kind'
+
+    switch ($kind) {
+        'embedded' {
+            $handler = Get-DescriptorField -Descriptor $entry -Key 'Handler'
+            $profile = New-HelpProfile -Context 'boxer' -Title $null -Description $null -Header $null -Commands @(Convert-RegistryEntryToHelpCommand -Entry $entry -Context 'boxer')
+            $lines = Render-CommandHelp -Entry (Convert-RegistryEntryToHelpCommand -Entry $entry -Context 'boxer') -Profile $profile -SubPath $subPath
+            foreach ($line in $lines) { Write-Output $line }
+        }
+        'external-file' {
+            $handler = Get-DescriptorField -Descriptor $entry -Key 'Handler'
+            $profile = New-HelpProfile -Context 'box' -Title $null -Description $null -Header $null -Commands @(Convert-RegistryEntryToHelpCommand -Entry $entry -Context 'box')
+            $lines = Render-CommandHelp -Entry (Convert-RegistryEntryToHelpCommand -Entry $entry -Context 'box') -Profile $profile -SubPath $subPath
+            foreach ($line in $lines) { Write-Output $line }
+        }
+        'external-directory' {
+            $subcommands = Get-DescriptorField -Descriptor $entry -Key 'Subcommands'
+            if (-not $subcommands) { $subcommands = @{} }
+            $helpHandler = Get-DescriptorField -Descriptor $entry -Key 'HelpHandler'
+            $defaultHandler = Get-DescriptorField -Descriptor $entry -Key 'DefaultHandler'
+
+            if ($subPath.Count -gt 0) {
+                $subName = $subPath[0].ToLower()
+                if ($subcommands.ContainsKey($subName)) {
+                    $subValue = $subcommands[$subName]
+
+                    # Handle both legacy (string) and new (hashtable) formats
+                    if ($subValue -is [string]) {
+                        # Legacy: direct file path
+                        $subHandler = @{ Type = 'script'; Path = $subValue }
+                    } else {
+                        # New: hashtable with Handler field
+                        $subHandler = Get-DescriptorField -Descriptor $subValue -Key 'Handler'
+                    }
+
+                    $helpData = Get-HelpFromDescriptor -Descriptor $subHandler
+                    if ($helpData) {
+                        $context = if ($script:Mode -and $script:Mode.ToLower() -eq 'boxer') { 'boxer' } else { 'box' }
+                        $cmdEntry = New-HelpCommandEntry -Name $subName -Synopsis $helpData.Synopsis -Description $helpData.Description
+                        $profile = New-HelpProfile -Context $context -Title $null -Description $null -Header $null -Commands @($cmdEntry)
+                        $lines = Render-CommandHelp -Entry $cmdEntry -Profile $profile -SubPath @()
+                        foreach ($line in $lines) { Write-Output $line }
+                    }
+                    return
+                }
+            }
+
+            if ($helpHandler) {
+                $helpOutput = & $helpHandler @()
+                if ($helpOutput) { $helpOutput | ForEach-Object { Write-Output $_ } }
+                return
+            }
+
+            $profile = New-HelpProfile -Context 'box' -Title $null -Description $null -Header $null -Commands @(Convert-RegistryEntryToHelpCommand -Entry $entry -Context 'box')
+            $lines = Render-CommandHelp -Entry (Convert-RegistryEntryToHelpCommand -Entry $entry -Context 'box') -Profile $profile -SubPath $subPath
+            foreach ($line in $lines) { Write-Output $line }
+        }
+        'metadata' {
+            $dispatcher = Get-DescriptorField -Descriptor $entry -Key 'Dispatcher'
+            $subcommands = Get-DescriptorField -Descriptor $entry -Key 'Subcommands'
+            if (-not $subcommands) { $subcommands = @{} }
+            $helpHandler = Get-DescriptorField -Descriptor $entry -Key 'HelpHandler'
+            $handler = Get-DescriptorField -Descriptor $entry -Key 'Handler'
+            $name = Get-DescriptorField -Descriptor $entry -Key 'Name'
+
+            if ($dispatcher) {
+                $helpPath = @($name)
+                if ($subPath.Count -gt 0) { $helpPath += $subPath }
+                $helpPath += 'help'
+                Invoke-DispatcherDescriptor -Descriptor $dispatcher -CommandPath $helpPath -Arguments @()
+                return
+            }
+
+            if ($subPath.Count -gt 0) {
+                $subName = $subPath[0].ToLower()
+                if ($subcommands.ContainsKey($subName)) {
+                    $subHandler = Get-DescriptorField -Descriptor $subcommands[$subName] -Key 'Handler'
+                    $helpData = Get-HelpFromDescriptor -Descriptor $subHandler
+                    if ($helpData) {
+                        $context = if ($script:Mode -and $script:Mode.ToLower() -eq 'boxer') { 'boxer' } else { 'box' }
+                        $cmdEntry = New-HelpCommandEntry -Name $subName -Synopsis $helpData.Synopsis -Description $helpData.Description
+                        $profile = New-HelpProfile -Context $context -Title $null -Description $null -Header $null -Commands @($cmdEntry)
+                        $lines = Render-CommandHelp -Entry $cmdEntry -Profile $profile -SubPath @()
+                        foreach ($line in $lines) { Write-Output $line }
+                    }
+                    return
+                }
+            }
+
+            if ($helpHandler) {
+                $helpOutput = & $helpHandler @()
+                if ($helpOutput) { $helpOutput | ForEach-Object { Write-Output $_ } }
+                return
+            }
+
+            if ($handler) {
+                $helpData = Get-HelpFromDescriptor -Descriptor $handler
+                if ($helpData) {
+                    $context = if ($script:Mode -and $script:Mode.ToLower() -eq 'boxer') { 'boxer' } else { 'box' }
+                    $cmdEntry = New-HelpCommandEntry -Name $name -Synopsis $helpData.Synopsis -Description $helpData.Description
+                    $profile = New-HelpProfile -Context $context -Title $null -Description $null -Header $null -Commands @($cmdEntry)
+                    $lines = Render-CommandHelp -Entry $cmdEntry -Profile $profile -SubPath @()
+                    foreach ($line in $lines) { Write-Output $line }
+                }
+            }
+            else {
+                $profile = New-HelpProfile -Context 'box' -Title $null -Description $null -Header $null -Commands @(Convert-RegistryEntryToHelpCommand -Entry $entry -Context 'box')
+                $lines = Render-CommandHelp -Entry (Convert-RegistryEntryToHelpCommand -Entry $entry -Context 'box') -Profile $profile -SubPath $subPath
+                foreach ($line in $lines) { Write-Output $line }
+            }
+        }
+        default {
+            Write-Output "No help available for $commandName"
+        }
+    }
 }
 
 # END core/help.ps1
@@ -3387,7 +3423,7 @@ function Ensure-SevenZip {
 
 .NOTES
     Module: templates.ps1
-    Version: 0.1.119
+    Version: 0.1.120
 #>
 
 # ============================================================================
