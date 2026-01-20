@@ -8,7 +8,7 @@
 
 .NOTES
     Build Date: 2026-01-20
-    Version: 0.1.123
+    Version: 0.1.124
     Build Type: Embedded
 #>
 
@@ -46,7 +46,7 @@ while ($true) {
 $script:BoxingRoot = $BaseDir
 $script:Mode = 'box'
 $script:IsEmbedded = $true
-$script:BoxerVersion = "0.1.123"
+$script:BoxerVersion = "0.1.124"
 $script:LoadedModules = @{}
 $script:Commands = @{}
 $script:CommandRegistry = @{}
@@ -1314,6 +1314,17 @@ function Register-EmbeddedCommands {
         # Determine Kind
         # If it has subcommands, treat as 'external-directory' (supports Subcommands + DefaultHandler)
         # If ONLY default handler, treat as 'embedded' (simple)
+
+        # If no default handler but has self-named subcommand, extract synopsis from it
+        if (-not $group.DefaultHandler -and $group.Subcommands.ContainsKey($commandName)) {
+            $selfSubcommand = $group.Subcommands[$commandName]
+            if ($selfSubcommand -and $selfSubcommand.Synopsis) {
+                $group.Synopsis = $selfSubcommand.Synopsis
+            }
+            if ($selfSubcommand -and $selfSubcommand.Description) {
+                $group.Description = $selfSubcommand.Description
+            }
+        }
 
         if ($group.Subcommands.Count -gt 0) {
              $script:CommandRegistry[$commandName] = @{
@@ -3446,7 +3457,7 @@ function Ensure-SevenZip {
 
 .NOTES
     Module: templates.ps1
-    Version: 0.1.123
+    Version: 0.1.124
 #>
 
 # ============================================================================

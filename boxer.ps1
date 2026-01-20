@@ -7,8 +7,8 @@
     Standalone boxer.ps1 with embedded core libraries and modules
 
 .NOTES
-    Build Date: 2026-01-20 05:16:28
-    Version: 0.1.202
+    Build Date: 2026-01-20 05:17:24
+    Version: 0.1.203
     Build Type: Embedded
 #>
 
@@ -25,7 +25,7 @@ $ErrorActionPreference = 'Stop'
 $script:BoxingRoot = if ($PSScriptRoot) { $PSScriptRoot } else { $env:TEMP }
 $script:Mode = 'boxer'
 $script:IsEmbedded = $true
-$script:BoxerVersion = "0.1.202"
+$script:BoxerVersion = "0.1.203"
 $script:LoadedModules = @{}
 $script:Commands = @{}
 $script:CommandRegistry = @{}
@@ -1294,6 +1294,17 @@ function Register-EmbeddedCommands {
         # Determine Kind
         # If it has subcommands, treat as 'external-directory' (supports Subcommands + DefaultHandler)
         # If ONLY default handler, treat as 'embedded' (simple)
+
+        # If no default handler but has self-named subcommand, extract synopsis from it
+        if (-not $group.DefaultHandler -and $group.Subcommands.ContainsKey($commandName)) {
+            $selfSubcommand = $group.Subcommands[$commandName]
+            if ($selfSubcommand -and $selfSubcommand.Synopsis) {
+                $group.Synopsis = $selfSubcommand.Synopsis
+            }
+            if ($selfSubcommand -and $selfSubcommand.Description) {
+                $group.Description = $selfSubcommand.Description
+            }
+        }
 
         if ($group.Subcommands.Count -gt 0) {
              $script:CommandRegistry[$commandName] = @{
