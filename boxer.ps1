@@ -7,8 +7,8 @@
     Standalone boxer.ps1 with embedded core libraries and modules
 
 .NOTES
-    Build Date: 2026-01-20 05:13:55
-    Version: 0.1.201
+    Build Date: 2026-01-20 05:16:28
+    Version: 0.1.202
     Build Type: Embedded
 #>
 
@@ -25,7 +25,7 @@ $ErrorActionPreference = 'Stop'
 $script:BoxingRoot = if ($PSScriptRoot) { $PSScriptRoot } else { $env:TEMP }
 $script:Mode = 'boxer'
 $script:IsEmbedded = $true
-$script:BoxerVersion = "0.1.201"
+$script:BoxerVersion = "0.1.202"
 $script:LoadedModules = @{}
 $script:Commands = @{}
 $script:CommandRegistry = @{}
@@ -995,7 +995,7 @@ function Register-ExternalDirectoryModule {
 
     if ($script:CommandRegistry.ContainsKey($ModuleName.ToLower())) { return }
 
-    # Extract help metadata from DefaultHandler
+    # Extract help metadata from DefaultHandler or self-named subcommand
     $commandSynopsis = $null
     $commandDescription = $null
 
@@ -1006,6 +1006,16 @@ function Register-ExternalDirectoryModule {
         }
         if ($helpInfo -and ($helpInfo.PSObject.Properties.Name -contains 'Description') -and $helpInfo.Description -and $helpInfo.Description.Text) {
             $commandDescription = $helpInfo.Description.Text
+        }
+    }
+    elseif ($subcommands.ContainsKey($commandName)) {
+        # No default handler - try to get synopsis from self-named subcommand (e.g., env/env.ps1)
+        $selfSubcommand = $subcommands[$commandName]
+        if ($selfSubcommand -and $selfSubcommand.Synopsis) {
+            $commandSynopsis = $selfSubcommand.Synopsis
+        }
+        if ($selfSubcommand -and $selfSubcommand.Description) {
+            $commandDescription = $selfSubcommand.Description
         }
     }
 

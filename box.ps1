@@ -8,7 +8,7 @@
 
 .NOTES
     Build Date: 2026-01-20
-    Version: 0.1.122
+    Version: 0.1.123
     Build Type: Embedded
 #>
 
@@ -46,7 +46,7 @@ while ($true) {
 $script:BoxingRoot = $BaseDir
 $script:Mode = 'box'
 $script:IsEmbedded = $true
-$script:BoxerVersion = "0.1.122"
+$script:BoxerVersion = "0.1.123"
 $script:LoadedModules = @{}
 $script:Commands = @{}
 $script:CommandRegistry = @{}
@@ -1015,7 +1015,7 @@ function Register-ExternalDirectoryModule {
 
     if ($script:CommandRegistry.ContainsKey($ModuleName.ToLower())) { return }
 
-    # Extract help metadata from DefaultHandler
+    # Extract help metadata from DefaultHandler or self-named subcommand
     $commandSynopsis = $null
     $commandDescription = $null
 
@@ -1026,6 +1026,16 @@ function Register-ExternalDirectoryModule {
         }
         if ($helpInfo -and ($helpInfo.PSObject.Properties.Name -contains 'Description') -and $helpInfo.Description -and $helpInfo.Description.Text) {
             $commandDescription = $helpInfo.Description.Text
+        }
+    }
+    elseif ($subcommands.ContainsKey($commandName)) {
+        # No default handler - try to get synopsis from self-named subcommand (e.g., env/env.ps1)
+        $selfSubcommand = $subcommands[$commandName]
+        if ($selfSubcommand -and $selfSubcommand.Synopsis) {
+            $commandSynopsis = $selfSubcommand.Synopsis
+        }
+        if ($selfSubcommand -and $selfSubcommand.Description) {
+            $commandDescription = $selfSubcommand.Description
         }
     }
 
@@ -3436,7 +3446,7 @@ function Ensure-SevenZip {
 
 .NOTES
     Module: templates.ps1
-    Version: 0.1.122
+    Version: 0.1.123
 #>
 
 # ============================================================================
