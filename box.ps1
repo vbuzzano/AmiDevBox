@@ -8,7 +8,7 @@
 
 .NOTES
     Build Date: 2026-01-20
-    Version: 0.1.112
+    Version: 0.1.113
     Build Type: Embedded
 #>
 
@@ -46,7 +46,7 @@ while ($true) {
 $script:BoxingRoot = $BaseDir
 $script:Mode = 'box'
 $script:IsEmbedded = $true
-$script:BoxerVersion = "0.1.112"
+$script:BoxerVersion = "0.1.113"
 $script:LoadedModules = @{}
 $script:Commands = @{}
 $script:CommandRegistry = @{}
@@ -1250,7 +1250,16 @@ function Register-EmbeddedCommands {
             }
         } else {
             # This is a Subcommand (e.g. Invoke-Box-Pkg-Install)
-            $group.Subcommands[$subcommandName] = $funcName
+            # Extract help info for the subcommand
+            $subHelpInfo = Get-Help $funcName -ErrorAction SilentlyContinue
+            $subSynopsis = if ($subHelpInfo -and $subHelpInfo.Synopsis -and $subHelpInfo.Synopsis -ne $funcName) { $subHelpInfo.Synopsis } else { $null }
+            $subDescription = if ($subHelpInfo -and $subHelpInfo.Description) { ($subHelpInfo.Description | Out-String).Trim() } else { $null }
+            
+            $group.Subcommands[$subcommandName] = @{
+                Handler = @{ Type = 'function'; Function = $funcName }
+                Synopsis = $subSynopsis
+                Description = $subDescription
+            }
         }
     }
 
@@ -1525,7 +1534,14 @@ function Invoke-Command {
                 }
 
                 if ($subName) {
-                    return (& $subcommands[$subName] @callArgs)
+                    $subHandler = $subcommands[$subName]
+                    if ($subHandler -is [hashtable] -and $subHandler.ContainsKey('Handler')) {
+                        # New format: hashtable with Handler descriptor
+                        return (Invoke-HandlerDescriptor -Descriptor $subHandler.Handler -Arguments $callArgs)
+                    } else {
+                        # Old format: direct function name or script path
+                        return (& $subHandler @callArgs)
+                    }
                 }
 
                 if ($defaultHandler) {
@@ -3011,6 +3027,31 @@ function New-HelpProfile {
     }
 }
 
+function Get-HelpFromScript {
+    param(
+        [string]$ScriptPath
+    )
+
+    if (-not $ScriptPath -or -not (Test-Path $ScriptPath)) {
+        return @{ Synopsis = $null; Description = $null }
+    }
+
+    try {
+        $helpInfo = Get-Help $ScriptPath -ErrorAction SilentlyContinue
+        if ($helpInfo) {
+            return @{
+                Synopsis = if ($helpInfo.Synopsis -and $helpInfo.Synopsis -ne $ScriptPath) { $helpInfo.Synopsis.Trim() } else { $null }
+                Description = if ($helpInfo.Description) { ($helpInfo.Description | Out-String).Trim() } else { $null }
+            }
+        }
+    }
+    catch {
+        Write-Verbose "Failed to get help from $ScriptPath: $_"
+    }
+
+    return @{ Synopsis = $null; Description = $null }
+}
+
 function Convert-RegistryEntryToHelpCommand {
     param(
         [hashtable]$Entry,
@@ -3026,6 +3067,26 @@ function Convert-RegistryEntryToHelpCommand {
     $description = Get-DescriptorField -Descriptor $Entry -Key 'Description'
     $source = Get-DescriptorField -Descriptor $Entry -Key 'Source'
     $isHidden = [bool](Get-DescriptorField -Descriptor $Entry -Key 'Hidden')
+
+    # For external-directory without synopsis, try to extract from default handler or first subcommand
+    if ($kind -eq 'external-directory' -and -not $synopsis) {
+        $defaultHandler = Get-DescriptorField -Descriptor $Entry -Key 'DefaultHandler'
+        if ($defaultHandler) {
+            $helpData = Get-HelpFromScript -ScriptPath $defaultHandler
+            $synopsis = $helpData.Synopsis
+            $description = $helpData.Description
+        }
+    }
+
+    # For external-file, extract help from the script
+    if ($kind -eq 'external-file' -and -not $synopsis) {
+        $handler = Get-DescriptorField -Descriptor $Entry -Key 'Handler'
+        if ($handler) {
+            $helpData = Get-HelpFromScript -ScriptPath $handler
+            $synopsis = $helpData.Synopsis
+            $description = $helpData.Description
+        }
+    }
 
     $subcommands = switch ($kind) {
         'external-directory' { Convert-RegistrySubcommands -Subcommands (Get-DescriptorField -Descriptor $Entry -Key 'Subcommands') -Context $Context }
@@ -3054,12 +3115,23 @@ function Convert-RegistrySubcommands {
 
         if ($value -is [string]) {
             $handler = @{ Type = 'script'; Path = $value }
+            # Extract help from the script file
+            $helpData = Get-HelpFromScript -ScriptPath $value
+            $synopsis = $helpData.Synopsis
+            $description = $helpData.Description
         }
         elseif ($value -is [hashtable]) {
             $handler = Get-DescriptorField -Descriptor $value -Key 'Handler'
             $synopsis = Get-DescriptorField -Descriptor $value -Key 'Synopsis'
             $description = Get-DescriptorField -Descriptor $value -Key 'Description'
             if (-not $handler -and $value.ContainsKey('Path')) { $handler = @{ Type = 'script'; Path = $value['Path'] } }
+            
+            # If synopsis/description not in metadata, extract from handler
+            if (-not $synopsis -and $handler -and $handler.ContainsKey('Path')) {
+                $helpData = Get-HelpFromScript -ScriptPath $handler.Path
+                $synopsis = $helpData.Synopsis
+                $description = $helpData.Description
+            }
         }
 
         $results += New-HelpSubcommandEntry -Name $key -Synopsis $synopsis -Description $description -Handler $handler
@@ -3315,7 +3387,7 @@ function Ensure-SevenZip {
 
 .NOTES
     Module: templates.ps1
-    Version: 0.1.112
+    Version: 0.1.113
 #>
 
 # ============================================================================
