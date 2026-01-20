@@ -7,8 +7,8 @@
     Standalone boxer.ps1 with embedded core libraries and modules
 
 .NOTES
-    Build Date: 2026-01-20 04:31:47
-    Version: 0.1.196
+    Build Date: 2026-01-20 04:36:37
+    Version: 0.1.197
     Build Type: Embedded
 #>
 
@@ -25,7 +25,7 @@ $ErrorActionPreference = 'Stop'
 $script:BoxingRoot = if ($PSScriptRoot) { $PSScriptRoot } else { $env:TEMP }
 $script:Mode = 'boxer'
 $script:IsEmbedded = $true
-$script:BoxerVersion = "0.1.196"
+$script:BoxerVersion = "0.1.197"
 $script:LoadedModules = @{}
 $script:Commands = @{}
 $script:CommandRegistry = @{}
