@@ -7,8 +7,8 @@
     Standalone boxer.ps1 with embedded core libraries and modules
 
 .NOTES
-    Build Date: 2026-01-20 02:33:11
-    Version: 0.1.188
+    Build Date: 2026-01-20 02:35:40
+    Version: 0.1.189
     Build Type: Embedded
 #>
 
@@ -25,7 +25,7 @@ $ErrorActionPreference = 'Stop'
 $script:BoxingRoot = if ($PSScriptRoot) { $PSScriptRoot } else { $env:TEMP }
 $script:Mode = 'boxer'
 $script:IsEmbedded = $true
-$script:BoxerVersion = "0.1.188"
+$script:BoxerVersion = "0.1.189"
 $script:LoadedModules = @{}
 $script:Commands = @{}
 $script:CommandRegistry = @{}
@@ -1859,7 +1859,7 @@ function Get-HelpFromScript {
         }
     }
     catch {
-        Write-Verbose "Failed to get help from $ScriptPath: $_"
+        Write-Verbose "Failed to get help from ${ScriptPath}: $($_.Exception.Message)"
     }
 
     return @{ Synopsis = $null; Description = $null }

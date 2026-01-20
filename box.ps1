@@ -8,7 +8,7 @@
 
 .NOTES
     Build Date: 2026-01-20
-    Version: 0.1.114
+    Version: 0.1.115
     Build Type: Embedded
 #>
 
@@ -46,7 +46,7 @@ while ($true) {
 $script:BoxingRoot = $BaseDir
 $script:Mode = 'box'
 $script:IsEmbedded = $true
-$script:BoxerVersion = "0.1.114"
+$script:BoxerVersion = "0.1.115"
 $script:LoadedModules = @{}
 $script:Commands = @{}
 $script:CommandRegistry = @{}
@@ -3059,7 +3059,7 @@ function Get-HelpFromScript {
         }
     }
     catch {
-        Write-Verbose "Failed to get help from $ScriptPath: $_"
+        Write-Verbose "Failed to get help from ${ScriptPath}: $($_.Exception.Message)"
     }
 
     return @{ Synopsis = $null; Description = $null }
@@ -3400,7 +3400,7 @@ function Ensure-SevenZip {
 
 .NOTES
     Module: templates.ps1
-    Version: 0.1.114
+    Version: 0.1.115
 #>
 
 # ============================================================================
