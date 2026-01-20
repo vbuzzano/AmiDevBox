@@ -8,7 +8,7 @@
 
 .NOTES
     Build Date: 2026-01-20
-    Version: 0.1.113
+    Version: 0.1.114
     Build Type: Embedded
 #>
 
@@ -46,7 +46,7 @@ while ($true) {
 $script:BoxingRoot = $BaseDir
 $script:Mode = 'box'
 $script:IsEmbedded = $true
-$script:BoxerVersion = "0.1.113"
+$script:BoxerVersion = "0.1.114"
 $script:LoadedModules = @{}
 $script:Commands = @{}
 $script:CommandRegistry = @{}
@@ -3032,16 +3032,29 @@ function Get-HelpFromScript {
         [string]$ScriptPath
     )
 
-    if (-not $ScriptPath -or -not (Test-Path $ScriptPath)) {
+    if (-not $ScriptPath) {
         return @{ Synopsis = $null; Description = $null }
     }
 
     try {
-        $helpInfo = Get-Help $ScriptPath -ErrorAction SilentlyContinue
-        if ($helpInfo) {
-            return @{
-                Synopsis = if ($helpInfo.Synopsis -and $helpInfo.Synopsis -ne $ScriptPath) { $helpInfo.Synopsis.Trim() } else { $null }
-                Description = if ($helpInfo.Description) { ($helpInfo.Description | Out-String).Trim() } else { $null }
+        # Check if it's a function name (no path separators)
+        if ($ScriptPath -notmatch '[\\/]' -and (Get-Command $ScriptPath -CommandType Function -ErrorAction SilentlyContinue)) {
+            $helpInfo = Get-Help $ScriptPath -ErrorAction SilentlyContinue
+            if ($helpInfo) {
+                return @{
+                    Synopsis = if ($helpInfo.Synopsis -and $helpInfo.Synopsis -ne $ScriptPath) { $helpInfo.Synopsis.Trim() } else { $null }
+                    Description = if ($helpInfo.Description) { ($helpInfo.Description | Out-String).Trim() } else { $null }
+                }
+            }
+        }
+        # Otherwise treat as file path
+        elseif (Test-Path $ScriptPath) {
+            $helpInfo = Get-Help $ScriptPath -ErrorAction SilentlyContinue
+            if ($helpInfo) {
+                return @{
+                    Synopsis = if ($helpInfo.Synopsis -and $helpInfo.Synopsis -ne $ScriptPath) { $helpInfo.Synopsis.Trim() } else { $null }
+                    Description = if ($helpInfo.Description) { ($helpInfo.Description | Out-String).Trim() } else { $null }
+                }
             }
         }
     }
@@ -3387,7 +3400,7 @@ function Ensure-SevenZip {
 
 .NOTES
     Module: templates.ps1
-    Version: 0.1.113
+    Version: 0.1.114
 #>
 
 # ============================================================================

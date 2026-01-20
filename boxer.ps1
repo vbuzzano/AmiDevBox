@@ -7,8 +7,8 @@
     Standalone boxer.ps1 with embedded core libraries and modules
 
 .NOTES
-    Build Date: 2026-01-20 02:13:19
-    Version: 0.1.187
+    Build Date: 2026-01-20 02:33:11
+    Version: 0.1.188
     Build Type: Embedded
 #>
 
@@ -25,7 +25,7 @@ $ErrorActionPreference = 'Stop'
 $script:BoxingRoot = if ($PSScriptRoot) { $PSScriptRoot } else { $env:TEMP }
 $script:Mode = 'boxer'
 $script:IsEmbedded = $true
-$script:BoxerVersion = "0.1.187"
+$script:BoxerVersion = "0.1.188"
 $script:LoadedModules = @{}
 $script:Commands = @{}
 $script:CommandRegistry = @{}
@@ -1832,16 +1832,29 @@ function Get-HelpFromScript {
         [string]$ScriptPath
     )
 
-    if (-not $ScriptPath -or -not (Test-Path $ScriptPath)) {
+    if (-not $ScriptPath) {
         return @{ Synopsis = $null; Description = $null }
     }
 
     try {
-        $helpInfo = Get-Help $ScriptPath -ErrorAction SilentlyContinue
-        if ($helpInfo) {
-            return @{
-                Synopsis = if ($helpInfo.Synopsis -and $helpInfo.Synopsis -ne $ScriptPath) { $helpInfo.Synopsis.Trim() } else { $null }
-                Description = if ($helpInfo.Description) { ($helpInfo.Description | Out-String).Trim() } else { $null }
+        # Check if it's a function name (no path separators)
+        if ($ScriptPath -notmatch '[\\/]' -and (Get-Command $ScriptPath -CommandType Function -ErrorAction SilentlyContinue)) {
+            $helpInfo = Get-Help $ScriptPath -ErrorAction SilentlyContinue
+            if ($helpInfo) {
+                return @{
+                    Synopsis = if ($helpInfo.Synopsis -and $helpInfo.Synopsis -ne $ScriptPath) { $helpInfo.Synopsis.Trim() } else { $null }
+                    Description = if ($helpInfo.Description) { ($helpInfo.Description | Out-String).Trim() } else { $null }
+                }
+            }
+        }
+        # Otherwise treat as file path
+        elseif (Test-Path $ScriptPath) {
+            $helpInfo = Get-Help $ScriptPath -ErrorAction SilentlyContinue
+            if ($helpInfo) {
+                return @{
+                    Synopsis = if ($helpInfo.Synopsis -and $helpInfo.Synopsis -ne $ScriptPath) { $helpInfo.Synopsis.Trim() } else { $null }
+                    Description = if ($helpInfo.Description) { ($helpInfo.Description | Out-String).Trim() } else { $null }
+                }
             }
         }
     }
