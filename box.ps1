@@ -8,7 +8,7 @@
 
 .NOTES
     Build Date: 2026-01-20
-    Version: 0.1.120
+    Version: 0.1.121
     Build Type: Embedded
 #>
 
@@ -46,7 +46,7 @@ while ($true) {
 $script:BoxingRoot = $BaseDir
 $script:Mode = 'box'
 $script:IsEmbedded = $true
-$script:BoxerVersion = "0.1.120"
+$script:BoxerVersion = "0.1.121"
 $script:LoadedModules = @{}
 $script:Commands = @{}
 $script:CommandRegistry = @{}
@@ -3121,7 +3121,15 @@ function Render-CommandHelp {
 
     $title = if ($Entry.Name) { $Entry.Name } else { 'Command' }
     $fallbackDesc = if ($Profile.ContainsKey('Description')) { $Profile['Description'] } else { 'No description available.' }
-    $desc = if ($Entry.ContainsKey('Description') -and $Entry['Description'] -and $Entry['Description'].Trim() -ne '') { $Entry['Description'] } else { $fallbackDesc }
+    
+    # Use Description if available and not empty, otherwise fallback to Synopsis, then fallback message
+    $desc = $fallbackDesc
+    if ($Entry.ContainsKey('Description') -and $Entry['Description'] -and $Entry['Description'].Trim() -ne '') {
+        $desc = $Entry['Description']
+    }
+    elseif ($Entry.ContainsKey('Synopsis') -and $Entry['Synopsis'] -and $Entry['Synopsis'].Trim() -ne '') {
+        $desc = $Entry['Synopsis']
+    }
 
     $lines += Wrap-Text -Text $title -Width $wrap
     $lines += Wrap-Text -Text $desc -Width $wrap
@@ -3423,7 +3431,7 @@ function Ensure-SevenZip {
 
 .NOTES
     Module: templates.ps1
-    Version: 0.1.120
+    Version: 0.1.121
 #>
 
 # ============================================================================

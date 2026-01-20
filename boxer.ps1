@@ -7,8 +7,8 @@
     Standalone boxer.ps1 with embedded core libraries and modules
 
 .NOTES
-    Build Date: 2026-01-20 05:11:57
-    Version: 0.1.199
+    Build Date: 2026-01-20 05:12:33
+    Version: 0.1.200
     Build Type: Embedded
 #>
 
@@ -25,7 +25,7 @@ $ErrorActionPreference = 'Stop'
 $script:BoxingRoot = if ($PSScriptRoot) { $PSScriptRoot } else { $env:TEMP }
 $script:Mode = 'boxer'
 $script:IsEmbedded = $true
-$script:BoxerVersion = "0.1.199"
+$script:BoxerVersion = "0.1.200"
 $script:LoadedModules = @{}
 $script:Commands = @{}
 $script:CommandRegistry = @{}
@@ -1921,7 +1921,15 @@ function Render-CommandHelp {
 
     $title = if ($Entry.Name) { $Entry.Name } else { 'Command' }
     $fallbackDesc = if ($Profile.ContainsKey('Description')) { $Profile['Description'] } else { 'No description available.' }
-    $desc = if ($Entry.ContainsKey('Description') -and $Entry['Description'] -and $Entry['Description'].Trim() -ne '') { $Entry['Description'] } else { $fallbackDesc }
+    
+    # Use Description if available and not empty, otherwise fallback to Synopsis, then fallback message
+    $desc = $fallbackDesc
+    if ($Entry.ContainsKey('Description') -and $Entry['Description'] -and $Entry['Description'].Trim() -ne '') {
+        $desc = $Entry['Description']
+    }
+    elseif ($Entry.ContainsKey('Synopsis') -and $Entry['Synopsis'] -and $Entry['Synopsis'].Trim() -ne '') {
+        $desc = $Entry['Synopsis']
+    }
 
     $lines += Wrap-Text -Text $title -Width $wrap
     $lines += Wrap-Text -Text $desc -Width $wrap
