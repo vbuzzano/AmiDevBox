@@ -7,8 +7,8 @@
     Standalone boxer.ps1 with embedded core libraries and modules
 
 .NOTES
-    Build Date: 2026-01-20 05:12:33
-    Version: 0.1.200
+    Build Date: 2026-01-20 05:13:55
+    Version: 0.1.201
     Build Type: Embedded
 #>
 
@@ -25,7 +25,7 @@ $ErrorActionPreference = 'Stop'
 $script:BoxingRoot = if ($PSScriptRoot) { $PSScriptRoot } else { $env:TEMP }
 $script:Mode = 'boxer'
 $script:IsEmbedded = $true
-$script:BoxerVersion = "0.1.200"
+$script:BoxerVersion = "0.1.201"
 $script:LoadedModules = @{}
 $script:Commands = @{}
 $script:CommandRegistry = @{}
@@ -1657,7 +1657,12 @@ function New-HelpCommandEntry {
 
     $fallbacks = Get-HelpDefaults -Context 'box'
     $effectiveSynopsis = if ([string]::IsNullOrWhiteSpace($Synopsis)) { $fallbacks.FallbackSynopsis } else { $Synopsis }
-    $effectiveDescription = if ([string]::IsNullOrWhiteSpace($Description)) { $fallbacks.FallbackDescription } else { $Description }
+    
+    # Use Description if available, otherwise use Synopsis, otherwise use fallback
+    $effectiveDescription = $Description
+    if ([string]::IsNullOrWhiteSpace($Description)) {
+        $effectiveDescription = if (-not [string]::IsNullOrWhiteSpace($Synopsis)) { $Synopsis } else { $fallbacks.FallbackDescription }
+    }
 
     return [ordered]@{
         Name = $Name.ToLower()

@@ -8,7 +8,7 @@
 
 .NOTES
     Build Date: 2026-01-20
-    Version: 0.1.121
+    Version: 0.1.122
     Build Type: Embedded
 #>
 
@@ -46,7 +46,7 @@ while ($true) {
 $script:BoxingRoot = $BaseDir
 $script:Mode = 'box'
 $script:IsEmbedded = $true
-$script:BoxerVersion = "0.1.121"
+$script:BoxerVersion = "0.1.122"
 $script:LoadedModules = @{}
 $script:Commands = @{}
 $script:CommandRegistry = @{}
@@ -2857,7 +2857,12 @@ function New-HelpCommandEntry {
 
     $fallbacks = Get-HelpDefaults -Context 'box'
     $effectiveSynopsis = if ([string]::IsNullOrWhiteSpace($Synopsis)) { $fallbacks.FallbackSynopsis } else { $Synopsis }
-    $effectiveDescription = if ([string]::IsNullOrWhiteSpace($Description)) { $fallbacks.FallbackDescription } else { $Description }
+    
+    # Use Description if available, otherwise use Synopsis, otherwise use fallback
+    $effectiveDescription = $Description
+    if ([string]::IsNullOrWhiteSpace($Description)) {
+        $effectiveDescription = if (-not [string]::IsNullOrWhiteSpace($Synopsis)) { $Synopsis } else { $fallbacks.FallbackDescription }
+    }
 
     return [ordered]@{
         Name = $Name.ToLower()
@@ -3431,7 +3436,7 @@ function Ensure-SevenZip {
 
 .NOTES
     Module: templates.ps1
-    Version: 0.1.121
+    Version: 0.1.122
 #>
 
 # ============================================================================
