@@ -30,3 +30,9 @@ Write-Host "------------------------------"
 echo $MyInvocation
 
 
+$command = $MyInvocation.MyCommand
+echo $command
+
+#MyCommand             : irm
+#                        https://raw.githubusercontent.com/vbuzzano/AmiDevBox/refs/heads/main/test.ps1
+#                        | iex
