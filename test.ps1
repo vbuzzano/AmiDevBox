@@ -15,12 +15,18 @@ $script:IsIrmIex = (-not $PSScriptRoot) -or (Get-Variable -Name IsIrmIexContext 
 echo "IsIrmIex: $script:IsIrmIex"
 
 Write-Host "------------------------------"
-
-Write-Host ""
-Write-Host ""
 Write-Host ""
 
+Write-Host ""
+Write-Host ""
 Write-Host "Variables"
 Write-Host "------------------------------"
 Get-Variable -Scope Script
+
+Write-Host ""
+Write-Host ""
+Write-Host "MyInvocation"
+Write-Host "------------------------------"
+echo $MyInvocation
+
 
