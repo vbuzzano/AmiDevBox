@@ -28,10 +28,25 @@ Write-Host ""
 Write-Host "MyInvocation"
 Write-Host "------------------------------"
 echo $MyInvocation
-
-
+Write-Host "------------------------------"
 $command = $MyInvocation.MyCommand
 echo $command
+
+
+$call = $MyInvocation.MyCommand.Definition
+if (-not $call) {
+    $call = $MyInvocation.MyCommand.ScriptBlock
+}
+
+Write-Host "------------------------------"
+echo "Definition:"
+echo ""
+echo $MyInvocation.MyCommand.Definition
+Write-Host "------------------------------"
+echo "scriptBlock:"
+echo ""
+echo $MyInvocation.MyCommand.ScriptBlock
+Write-Host "------------------------------"
 
 #MyCommand             : irm
 #                        https://raw.githubusercontent.com/vbuzzano/AmiDevBox/refs/heads/main/test.ps1
