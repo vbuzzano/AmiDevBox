@@ -14,6 +14,5 @@ Write-Host "------------------------------"
 $script:IsIrmIex = (-not $PSScriptRoot) -or (Get-Variable -Name IsIrmIexContext -Scope Script -ValueOnly -ErrorAction SilentlyContinue)
 echo "IsIrmIex: $script:IsIrmIex"
 
-exit 0
 
 
