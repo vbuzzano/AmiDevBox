@@ -1,53 +1,22 @@
 # IRM/IEX context execut Detection
 
+function Boxing-IsIrmIexContext {
+    $command = $MyInvocation.MyCommand
+    if (-not $command) { return $false }
+    if ($command.Definition) {
+        $command = $command.Definition
+    } elseif ($command.ScriptBlock) {
+        $command = $command.ScriptBlock
+    } else {
+        return $false
+    }
+    #$command = "irm https://raw.githubusercontent.com/vbuzzano/AmiDevBox/refs/heads/main/test.ps1 | iex"
+
+    return $command -match '(?i)^(irm)\s+http[s]?://[^\s]+\s+\|\s+(iex).*$'
+}
+
 Write-Host ""
 Write-Host "=== IRM/IEX Context Detection ==="
 Write-Host ""
-Write-Host "PSScriptRoot: $PSScriptRoot"
-Write-Host "------------------------------"
-Write-Host "IsIrmIexContext variable exists: $(Get-Variable -Name IsIrmIexContext -Scope Script -ErrorAction SilentlyContinue -ne $null)"
-Write-Host "--> Object:"
-Get-Variable -Name IsIrmIexContext -Scope Script
-Write-Host "------------------------------"
-
-# IRM/IEX context execut Detection
-$script:IsIrmIex = (-not $PSScriptRoot) -or (Get-Variable -Name IsIrmIexContext -Scope Script -ValueOnly -ErrorAction SilentlyContinue)
-echo "IsIrmIex: $script:IsIrmIex"
-
-Write-Host "------------------------------"
+Write-Host "isIrmIEx: $(Boxing-IsIrmIexContext)"
 Write-Host ""
-
-Write-Host ""
-Write-Host ""
-Write-Host "Variables"
-Write-Host "------------------------------"
-Get-Variable -Scope Script
-
-Write-Host ""
-Write-Host ""
-Write-Host "MyInvocation"
-Write-Host "------------------------------"
-echo $MyInvocation
-Write-Host "------------------------------"
-$command = $MyInvocation.MyCommand
-echo $command
-
-
-$call = $MyInvocation.MyCommand.Definition
-if (-not $call) {
-    $call = $MyInvocation.MyCommand.ScriptBlock
-}
-
-Write-Host "------------------------------"
-echo "Definition:"
-echo ""
-echo $MyInvocation.MyCommand.Definition
-Write-Host "------------------------------"
-echo "scriptBlock:"
-echo ""
-echo $MyInvocation.MyCommand.ScriptBlock
-Write-Host "------------------------------"
-
-#MyCommand             : irm
-#                        https://raw.githubusercontent.com/vbuzzano/AmiDevBox/refs/heads/main/test.ps1
-#                        | iex
